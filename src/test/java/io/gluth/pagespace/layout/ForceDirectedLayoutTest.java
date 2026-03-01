@@ -128,6 +128,45 @@ class ForceDirectedLayoutTest {
     }
 
     @Test
+    void nodesDoNotPinToCanvasEdgesAfterConvergence() {
+        PageGraph graph = new PageGraph();
+        graph.addLink(new Link(physics, math));
+        graph.addPage(quantum);   // isolated — only repulsion forces act on it
+        graph.addPage(logic);
+        ForceDirectedLayout layout = new ForceDirectedLayout(graph, W, H, SEED);
+        converge(layout, 400);
+
+        double xMargin = W * 0.04;
+        double yMargin = H * 0.04;
+        for (NodePosition pos : layout.positions().values()) {
+            assertTrue(pos.x() > xMargin && pos.x() < W - xMargin,
+                "x=" + pos.x() + " pinned to x-edge");
+            assertTrue(pos.y() > yMargin && pos.y() < H - yMargin,
+                "y=" + pos.y() + " pinned to y-edge");
+        }
+    }
+
+    @Test
+    void settledNodesDoNotMoveAfterExtendedSteps() {
+        PageGraph graph = new PageGraph();
+        graph.addLink(new Link(physics, math));
+        graph.addPage(quantum);  // isolated — only repulsion, will oscillate then settle
+        ForceDirectedLayout layout = new ForceDirectedLayout(graph, W, H, SEED);
+
+        converge(layout, 300);  // enough for adaptive damping to fully engage
+
+        double qx = layout.positions().get(quantum).x();
+        double qy = layout.positions().get(quantum).y();
+
+        converge(layout, 100);  // settled nodes must not move
+
+        assertEquals(qx, layout.positions().get(quantum).x(), 0.5,
+            "quantum x should not drift after settling");
+        assertEquals(qy, layout.positions().get(quantum).y(), 0.5,
+            "quantum y should not drift after settling");
+    }
+
+    @Test
     void pinnedPageRemainsAtCenterAfterSteps() {
         PageGraph graph = new PageGraph();
         graph.addLink(new Link(physics, math));
