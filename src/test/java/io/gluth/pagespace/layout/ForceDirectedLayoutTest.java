@@ -167,6 +167,33 @@ class ForceDirectedLayoutTest {
     }
 
     @Test
+    void pinnedPageTransitionsSmoothlyCenterward() {
+        PageGraph graph = new PageGraph();
+        graph.addLink(new Link(physics, math));
+        ForceDirectedLayout layout = new ForceDirectedLayout(graph, W, H, SEED);
+
+        // Let nodes settle somewhere away from centre
+        converge(layout, 30);
+
+        NodePosition physPos = layout.positions().get(physics);
+        double startX = physPos.x(), startY = physPos.y();
+
+        layout.setPinnedPage(physics);
+
+        // One step in: must have moved toward centre but not yet arrived
+        layout.step();
+        double dx = Math.abs(physPos.x() - W / 2.0);
+        double dyAmt = Math.abs(physPos.y() - H / 2.0);
+        assertTrue(dx > 0.5 || dyAmt > 0.5,
+            "Should not snap to centre instantly — still transitioning");
+
+        // After full transition: must be at centre
+        converge(layout, layout.transitionSteps() + 5);
+        assertEquals(W / 2.0, physPos.x(), 1.0, "x should reach centre after transition");
+        assertEquals(H / 2.0, physPos.y(), 1.0, "y should reach centre after transition");
+    }
+
+    @Test
     void pinnedPageRemainsAtCenterAfterSteps() {
         PageGraph graph = new PageGraph();
         graph.addLink(new Link(physics, math));

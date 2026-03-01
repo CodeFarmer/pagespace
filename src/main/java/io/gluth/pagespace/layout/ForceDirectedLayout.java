@@ -37,6 +37,8 @@ public class ForceDirectedLayout {
 
     private static final double BOUNDARY_MARGIN   = 0.12;
     private static final double BOUNDARY_STRENGTH = 50.0;
+    /** Steps over which the focus node travels from its old position to centre. */
+    private static final int    TRANSITION_STEPS  = 35;
 
     private final PageGraph graph;
     private final double width;
@@ -48,7 +50,9 @@ public class ForceDirectedLayout {
     private final Map<Page, double[]>     velocities  = new LinkedHashMap<>();
     private final Map<Page, Integer>      stillCounts = new LinkedHashMap<>();
 
-    private Page pinnedPage;
+    private Page   pinnedPage;
+    private double transStartX, transStartY, transStartZ;
+    private int    transStep = TRANSITION_STEPS; // starts "done" so first pinning transitions
 
     public ForceDirectedLayout(PageGraph graph, double width, double height) {
         this(graph, width, height, System.nanoTime());
@@ -97,8 +101,15 @@ public class ForceDirectedLayout {
         this.pinnedPage = page;
         NodePosition pos = positions.get(page);
         if (pos != null) {
-            pos.setX(width / 2.0); pos.setY(height / 2.0); pos.setZ(0.0);
+            transStartX = pos.x();
+            transStartY = pos.y();
+            transStartZ = pos.z();
+        } else {
+            transStartX = width / 2.0;
+            transStartY = height / 2.0;
+            transStartZ = 0.0;
         }
+        transStep = 0;
         wakeAll();
     }
 
@@ -218,18 +229,30 @@ public class ForceDirectedLayout {
             pos.setZ(clamp(pos.z()+vel[2], 0, depth));
         }
 
-        // Enforce pinned position
-        if (pinnedPage!=null && positions.containsKey(pinnedPage)) {
-            NodePosition pp=positions.get(pinnedPage);
-            pp.setX(width/2.0); pp.setY(height/2.0); pp.setZ(0.0);
+        // Animate pinned node toward centre using a smoothstep curve
+        if (pinnedPage != null && positions.containsKey(pinnedPage)) {
+            NodePosition pp = positions.get(pinnedPage);
+            if (transStep < TRANSITION_STEPS) {
+                transStep++;
+                double t  = (double) transStep / TRANSITION_STEPS;
+                double t2 = t * t * (3 - 2 * t);           // smoothstep
+                pp.setX(transStartX + (width  / 2.0 - transStartX) * t2);
+                pp.setY(transStartY + (height / 2.0 - transStartY) * t2);
+                pp.setZ(transStartZ + (0.0          - transStartZ) * t2);
+            } else {
+                pp.setX(width / 2.0);
+                pp.setY(height / 2.0);
+                pp.setZ(0.0);
+            }
         }
     }
 
-    public Map<Page, NodePosition> positions() { return Collections.unmodifiableMap(positions); }
-    public PageGraph graph()  { return graph; }
-    public double width()     { return width; }
-    public double height()    { return height; }
-    public double depth()     { return depth; }
+    public Map<Page, NodePosition> positions()  { return Collections.unmodifiableMap(positions); }
+    public PageGraph graph()       { return graph; }
+    public double width()          { return width; }
+    public double height()         { return height; }
+    public double depth()          { return depth; }
+    public int    transitionSteps(){ return TRANSITION_STEPS; }
 
     private static double clamp(double v, double lo, double hi) {
         return Math.max(lo, Math.min(hi, v));
