@@ -12,6 +12,7 @@ import java.awt.*;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainWindow extends JFrame implements NavigationListener {
 
@@ -21,6 +22,8 @@ public class MainWindow extends JFrame implements NavigationListener {
     private final ContentPane contentPane;
     private final SpatialPane spatialPane;
     private final Deque<Page> history = new ArrayDeque<>();
+    /** Monotonically incremented on every navigation; workers check before committing results. */
+    private final AtomicInteger navGeneration = new AtomicInteger(0);
 
     public MainWindow(ContentBackend backend, PageGraph graph, ForceDirectedLayout layout) {
         super("page-space");
@@ -46,38 +49,55 @@ public class MainWindow extends JFrame implements NavigationListener {
 
     @Override
     public void navigateTo(Page page) {
-        SwingUtilities.invokeLater(() -> {
-            try {
-                List<Page> linkedPages = backend.fetchLinks(page.id());
-                // If the page doesn't exist in our fetched pages, use the resolved one
-                Page resolvedPage = linkedPages.isEmpty() ? page
-                    : backend.defaultPage().id().equals(page.id()) ? backend.defaultPage() : page;
+        int myGen = navGeneration.incrementAndGet();
 
-                // Try to get a proper page title by looking up in backend links
-                Page titledPage = page;
-                // Add linked pages to graph
-                for (Page linked : linkedPages) {
-                    graph.addLink(new Link(page, linked));
-                    // Use the actual page with correct title
-                    if (linked.id().equals(page.id())) {
-                        titledPage = linked;
-                    }
+        // Show loading state immediately on EDT
+        contentPane.setLoading(page.title());
+
+        SwingWorker<NavResult, Void> worker = new SwingWorker<>() {
+            @Override
+            protected NavResult doInBackground() {
+                try {
+                    List<Page> linkedPages = backend.fetchLinks(page.id());
+                    String body = backend.fetchBody(page.id());
+                    return new NavResult(page, linkedPages, body, null);
+                } catch (PageNotFoundException e) {
+                    return new NavResult(page, List.of(), "", e.getMessage());
+                }
+            }
+
+            @Override
+            protected void done() {
+                // Discard if a newer navigation has started
+                if (navGeneration.get() != myGen) return;
+
+                NavResult result;
+                try {
+                    result = get();
+                } catch (Exception e) {
+                    result = new NavResult(page, List.of(), "", e.getMessage());
                 }
 
+                if (result.error != null) {
+                    JOptionPane.showMessageDialog(MainWindow.this,
+                        "Page not found: " + page.id(), "Navigation Error",
+                        JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+
+                for (Page linked : result.linkedPages) {
+                    graph.addLink(new Link(page, linked));
+                }
                 layout.syncWithGraph();
                 layout.setPinnedPage(page);
 
-                String body = backend.fetchBody(page.id());
                 history.push(page);
-                contentPane.setContent(page, body);
+                contentPane.setContent(page, result.body);
                 spatialPane.setCurrentPage(page);
-
-            } catch (PageNotFoundException e) {
-                JOptionPane.showMessageDialog(this,
-                    "Page not found: " + page.id(), "Navigation Error",
-                    JOptionPane.ERROR_MESSAGE);
             }
-        });
+        };
+
+        worker.execute();
     }
 
     private void navigateBack() {
@@ -94,4 +114,6 @@ public class MainWindow extends JFrame implements NavigationListener {
     public ContentPane contentPane()  { return contentPane; }
     public SpatialPane spatialPane()  { return spatialPane; }
     public JSplitPane  splitPane()    { return (JSplitPane) getContentPane(); }
+
+    private record NavResult(Page page, List<Page> linkedPages, String body, String error) {}
 }

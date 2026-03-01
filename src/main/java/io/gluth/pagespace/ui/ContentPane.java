@@ -60,6 +60,12 @@ public class ContentPane extends JPanel {
         backButton.setEnabled(true);
     }
 
+    public void setLoading(String title) {
+        titleLabel.setText("Loading " + title + "…");
+        bodyPane.setText("<html><body><i>Loading…</i></body></html>");
+        backButton.setEnabled(false);
+    }
+
     public String currentPageTitle() {
         return titleLabel.getText();
     }
