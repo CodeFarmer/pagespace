@@ -24,7 +24,10 @@ class ForceDirectedLayout(
         private const val BOUNDARY_MARGIN  = 0.12
         private const val BOUNDARY_STRENGTH = 50.0
         private const val TRANSITION_STEPS = 35
+        private const val MAX_COMPUTE_ITERATIONS = 500
     }
+
+    enum class Phase { IDLE, ANIMATING }
 
     val depth: Double = min(width, height)
     val transitionSteps: Int = TRANSITION_STEPS
@@ -35,14 +38,18 @@ class ForceDirectedLayout(
     private val velocities:  MutableMap<Page, DoubleArray>  = LinkedHashMap()
     private val stillCounts: MutableMap<Page, Int>          = LinkedHashMap()
 
-    private var pinnedPage:  Page?   = null
-    private var transStartX: Double  = 0.0
-    private var transStartY: Double  = 0.0
-    private var transStartZ: Double  = 0.0
-    private var transStep:   Int     = TRANSITION_STEPS
+    private var pinnedPage: Page? = null
+
+    private var phase: Phase = Phase.IDLE
+    private val animStart:  MutableMap<Page, NodePosition> = LinkedHashMap()
+    private val animTarget: MutableMap<Page, NodePosition> = LinkedHashMap()
+    private var animStep: Int = 0
 
     val positions: Map<Page, NodePosition>
         get() = Collections.unmodifiableMap(_positions)
+
+    val isSettled: Boolean
+        get() = isConverged()
 
     init {
         initPositions()
@@ -84,18 +91,6 @@ class ForceDirectedLayout(
 
     fun setPinnedPage(page: Page) {
         pinnedPage = page
-        val pos = _positions[page]
-        if (pos != null) {
-            transStartX = pos.x
-            transStartY = pos.y
-            transStartZ = pos.z
-        } else {
-            transStartX = width  / 2.0
-            transStartY = height / 2.0
-            transStartZ = 0.0
-        }
-        transStep = 0
-        wakeAll()
     }
 
     fun syncWithGraph() {
@@ -116,7 +111,61 @@ class ForceDirectedLayout(
         for (v in velocities.values) { v[0] = 0.0; v[1] = 0.0; v[2] = 0.0 }
     }
 
-    fun step() {
+    fun computeEquilibrium() {
+        // 1. Snapshot current positions as animation start
+        animStart.clear()
+        for ((page, pos) in _positions) {
+            animStart[page] = NodePosition(pos.x, pos.y, pos.z)
+        }
+
+        // 2. Wake all nodes and run force simulation to convergence
+        wakeAll()
+        for (i in 0 until MAX_COMPUTE_ITERATIONS) {
+            stepForces()
+            if (isConverged()) break
+        }
+
+        // 3. Snapshot converged positions as animation targets
+        animTarget.clear()
+        for ((page, pos) in _positions) {
+            animTarget[page] = NodePosition(pos.x, pos.y, pos.z)
+        }
+
+        // 4. Restore positions to animation start
+        for ((page, startPos) in animStart) {
+            val pos = _positions[page] ?: continue
+            pos.x = startPos.x
+            pos.y = startPos.y
+            pos.z = startPos.z
+        }
+
+        // 5. Begin animation phase
+        animStep = 0
+        phase = Phase.ANIMATING
+    }
+
+    fun completeAnimation() {
+        for ((page, target) in animTarget) {
+            val pos = _positions[page] ?: continue
+            pos.x = target.x
+            pos.y = target.y
+            pos.z = target.z
+        }
+        phase = Phase.IDLE
+        animStart.clear()
+        animTarget.clear()
+    }
+
+    private fun isConverged(): Boolean {
+        if (_positions.isEmpty()) return false
+        for ((page, count) in stillCounts) {
+            if (page == pinnedPage) continue
+            if (count < SETTLE_STEPS) return false
+        }
+        return true
+    }
+
+    private fun stepForces() {
         val pageList = _positions.keys.toList()
         val n = pageList.size
         if (n == 0) return
@@ -218,20 +267,42 @@ class ForceDirectedLayout(
             pos.z = clamp(pos.z + vel[2], 0.0, depth)
         }
 
-        // Animate pinned node toward centre using a smoothstep curve
+        // Clamp pinned page to center
         val pp = pinnedPage?.let { _positions[it] }
         if (pp != null) {
-            if (transStep < TRANSITION_STEPS) {
-                transStep++
-                val t  = transStep.toDouble() / TRANSITION_STEPS
+            pp.x = width  / 2.0
+            pp.y = height / 2.0
+            pp.z = 0.0
+        }
+    }
+
+    fun step() {
+        when (phase) {
+            Phase.IDLE -> return
+            Phase.ANIMATING -> {
+                animStep++
+                val t  = min(animStep.toDouble() / TRANSITION_STEPS, 1.0)
                 val t2 = t * t * (3 - 2 * t)
-                pp.x = transStartX + (width  / 2.0 - transStartX) * t2
-                pp.y = transStartY + (height / 2.0 - transStartY) * t2
-                pp.z = transStartZ + (0.0          - transStartZ) * t2
-            } else {
-                pp.x = width  / 2.0
-                pp.y = height / 2.0
-                pp.z = 0.0
+
+                for ((page, pos) in _positions) {
+                    val start  = animStart[page]  ?: continue
+                    val target = animTarget[page] ?: continue
+                    pos.x = start.x + (target.x - start.x) * t2
+                    pos.y = start.y + (target.y - start.y) * t2
+                    pos.z = start.z + (target.z - start.z) * t2
+                }
+
+                if (animStep >= TRANSITION_STEPS) {
+                    for ((page, target) in animTarget) {
+                        val pos = _positions[page] ?: continue
+                        pos.x = target.x
+                        pos.y = target.y
+                        pos.z = target.z
+                    }
+                    phase = Phase.IDLE
+                    animStart.clear()
+                    animTarget.clear()
+                }
             }
         }
     }

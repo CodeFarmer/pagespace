@@ -41,7 +41,7 @@ src/main/kotlin/io/gluth/pagespace/
 - Velocity + damping (`BASE_DAMPING = 0.75`) replaces temperature cooling
 - **Quadratic boundary repulsion** (`BOUNDARY_STRENGTH = 50`, margin = 12 % of each dimension) prevents nodes from pinning to canvas edges
 - **Adaptive settling**: per-node still-counter driven by velocity-reversal detection. Each direction reversal applies `REVERSAL_DAMP = 0.45×` and adds `REVERSAL_CREDIT = 8` to the counter; slow motion increments it by 1; fast motion without reversal decrements it by `FAST_DECAY = 2`. When the counter reaches `SETTLE_STEPS = 40` the velocity is zeroed and force updates are skipped entirely — frozen nodes cannot be re-woken by residual forces.
-- **Focus transition**: `setPinnedPage(page)` records the node's current position as `transStartX/Y/Z` and resets `transStep = 0`. Each `step()` call advances the counter and smoothstep-interpolates the node toward `(width/2, height/2, 0)` over `TRANSITION_STEPS = 35` frames. Navigation calls `wakeAll()`, resetting all still-counters and zeroing velocities so the network re-settles around the moving focus.
+- **Compute-then-animate**: two-phase state machine (`Phase.IDLE` / `Phase.ANIMATING`). `computeEquilibrium()` runs `stepForces()` in a tight loop (up to `MAX_COMPUTE_ITERATIONS = 500`) until all non-pinned nodes settle, snapshots start/target positions, then enters `ANIMATING`. `step()` is a no-op in `IDLE`; in `ANIMATING` it smoothstep-interpolates all nodes from start to target over `TRANSITION_STEPS = 35` frames. `setPinnedPage(page)` just sets the pinned page — the pinned node is clamped to centre during `stepForces()`, so the equilibrium already has it at `(width/2, height/2, 0)`.
 - New nodes spawned by `syncWithGraph()` are placed near the centroid of their already-positioned neighbours (with jitter), falling back to a random interior position.
 
 ### 3D rendering — `SpatialPane`
@@ -54,9 +54,10 @@ src/main/kotlin/io/gluth/pagespace/
 ### Navigation flow (`MainWindow`)
 1. `backend.fetchLinks(id)` → merge into `PageGraph`
 2. `layout.syncWithGraph()` — spawn positions for new nodes
-3. `layout.setPinnedPage(page)` — start transition animation
-4. `backend.fetchBody(id)` → push to `ContentPane`
-5. `spatialPane.setCurrentPage(page)` — highlight current node
+3. `layout.setPinnedPage(page)` — mark page as pinned (centred in next equilibrium)
+4. `layout.computeEquilibrium()` — compute converged positions, start smooth animation
+5. `backend.fetchBody(id)` → push to `ContentPane`
+6. `spatialPane.setCurrentPage(page)` — highlight current node
 
 All steps run on the EDT.
 
@@ -78,8 +79,6 @@ mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
 - **Graph pruning on navigation** (`MainWindow`): when navigating to a new page, remove nodes that have no path of length ≤ N to the current page, so the graph doesn't grow unboundedly during a long browsing session.
 - **Node search / jump bar** (`MainWindow` / `SpatialPane`): add a `JTextField` above the spatial pane that filters visible node labels as the user types and navigates to the matching page on Enter.
 - **Package as an Android app**
-- **Related nodes together**: Load second-order nodes and arrange them spatially closer if they also have links between them
-- **Simulate movement**: find the equilibrium point, then move smoothly towards it to eliminate the jitter
 - **Better node choice**: instead of the first n neighbours alphabetically, heuristically find out which ones are important and also give an option to increase or decrease the neighbour fetching density.
 
 ## Extension Points

@@ -17,6 +17,10 @@ class MainWindow(
     private val layout:  ForceDirectedLayout
 ) : JFrame("page-space"), NavigationListener {
 
+    companion object {
+        private const val MAX_SECOND_ORDER_NODES = 30
+    }
+
     private val _contentPane = ContentPane()
     private val _spatialPane = SpatialPane(layout)
     private val history: ArrayDeque<Page> = ArrayDeque()
@@ -79,10 +83,88 @@ class MainWindow(
                 }
                 layout.syncWithGraph()
                 layout.setPinnedPage(page)
+                layout.computeEquilibrium()
 
                 history.push(page)
                 _contentPane.setContent(page, result.body)
                 _spatialPane.setCurrentPage(page)
+
+                launchSecondOrderEnrichment(page, result.linkedPages, myGen)
+            }
+        }
+
+        worker.execute()
+    }
+
+    private fun launchSecondOrderEnrichment(
+        centerPage: Page,
+        firstOrderNeighbors: List<Page>,
+        generation: Int
+    ) {
+        val worker = object : SwingWorker<SecondOrderResult, Void>() {
+            override fun doInBackground(): SecondOrderResult {
+                val neighborLinks = mutableMapOf<Page, List<Page>>()
+                for (neighbor in firstOrderNeighbors) {
+                    if (navGeneration.get() != generation) return SecondOrderResult(emptyMap())
+                    try {
+                        neighborLinks[neighbor] = backend.fetchLinks(neighbor.id)
+                    } catch (_: PageNotFoundException) {
+                        // skip unreachable neighbors
+                    }
+                }
+                return SecondOrderResult(neighborLinks)
+            }
+
+            override fun done() {
+                if (navGeneration.get() != generation) return
+
+                val result = try {
+                    get()
+                } catch (_: Exception) {
+                    return
+                }
+
+                if (result.neighborLinks.isEmpty()) return
+
+                val existingPages = graph.pages()
+
+                // Phase 1: add cross-links between nodes already in the graph
+                for ((neighbor, targets) in result.neighborLinks) {
+                    for (target in targets) {
+                        if (target in existingPages && target != centerPage) {
+                            graph.addLink(Link(neighbor, target))
+                        }
+                    }
+                }
+
+                // Phase 2: find second-order nodes referenced by 2+ first-order neighbors
+                val candidateCounts = mutableMapOf<Page, Int>()
+                for ((_, targets) in result.neighborLinks) {
+                    for (target in targets) {
+                        if (target !in existingPages) {
+                            candidateCounts[target] = (candidateCounts[target] ?: 0) + 1
+                        }
+                    }
+                }
+
+                val bridgeNodes = candidateCounts.entries
+                    .filter { it.value >= 2 }
+                    .sortedByDescending { it.value }
+                    .take(MAX_SECOND_ORDER_NODES)
+                    .map { it.key }
+                    .toSet()
+
+                // Add links from first-order neighbors to accepted bridge nodes
+                for ((neighbor, targets) in result.neighborLinks) {
+                    for (target in targets) {
+                        if (target in bridgeNodes) {
+                            graph.addLink(Link(neighbor, target))
+                        }
+                    }
+                }
+
+                layout.syncWithGraph()
+                layout.computeEquilibrium()
             }
         }
 
@@ -109,5 +191,9 @@ class MainWindow(
         val linkedPages: List<Page>,
         val body:        String,
         val error:       String?
+    )
+
+    private data class SecondOrderResult(
+        val neighborLinks: Map<Page, List<Page>>
     )
 }
