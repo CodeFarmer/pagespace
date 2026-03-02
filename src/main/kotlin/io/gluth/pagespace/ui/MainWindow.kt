@@ -28,7 +28,8 @@ class MainWindow(
         _contentPane.setBackAction(::navigateBack)
 
         val splitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, _contentPane, _spatialPane)
-        splitPane.resizeWeight = 0.4
+        splitPane.resizeWeight = 1.0 / 3.0
+        splitPane.dividerLocation = 400
 
         contentPane = splitPane
         defaultCloseOperation = EXIT_ON_CLOSE
