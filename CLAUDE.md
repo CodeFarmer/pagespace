@@ -77,6 +77,8 @@ mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
 - **Spherical layout volume** (`ForceDirectedLayout`): replace the axis-aligned box boundary repulsion with a radial boundary centred on `(width/2, height/2, depth/2)` with radius `min(width, height) / 2`, so the node cloud forms a sphere rather than a box.
 - **Graph pruning on navigation** (`MainWindow`): when navigating to a new page, remove nodes that have no path of length ≤ N to the current page, so the graph doesn't grow unboundedly during a long browsing session.
 - **Node search / jump bar** (`MainWindow` / `SpatialPane`): add a `JTextField` above the spatial pane that filters visible node labels as the user types and navigates to the matching page on Enter.
+- **Package as an Android app**
+- **Related nodes together**: Load second-order nodes and arrange them spatially closer if they also have links between them
 
 ## Extension Points
 
