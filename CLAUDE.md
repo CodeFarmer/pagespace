@@ -79,6 +79,7 @@ mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
 - **Node search / jump bar** (`MainWindow` / `SpatialPane`): add a `JTextField` above the spatial pane that filters visible node labels as the user types and navigates to the matching page on Enter.
 - **Package as an Android app**
 - **Related nodes together**: Load second-order nodes and arrange them spatially closer if they also have links between them
+- **Simulate movement**: find the equilibrium point, then move smoothly towards it to eliminate the jitter
 
 ## Extension Points
 
