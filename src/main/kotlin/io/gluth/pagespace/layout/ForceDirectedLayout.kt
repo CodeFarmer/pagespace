@@ -157,6 +157,8 @@ class ForceDirectedLayout(
             }
         }
 
+        // TODO: replace box boundary with spherical boundary so the layout volume is a sphere
+        //       (repel nodes whose distance from centre exceeds radius = min(width,height)/2)
         // Quadratic boundary repulsion
         for (p in pageList) {
             if (p == pinnedPage) continue

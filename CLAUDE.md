@@ -11,15 +11,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-The design is intentionally target-agnostic: a core spatial navigation engine supports multiple content backends. The **reference implementation is Java/Swing**.
+The design is intentionally target-agnostic: a core spatial navigation engine supports multiple content backends. The **reference implementation is Kotlin/Swing**.
 
 ```
-src/main/java/io/gluth/pagespace/
+src/main/kotlin/io/gluth/pagespace/
 ├── domain/          Page, Link, PageGraph
 ├── backend/         ContentBackend (interface), PageNotFoundException, MockContentBackend
 ├── layout/          NodePosition, ForceDirectedLayout
 ├── ui/              NavigationListener, ContentPane, SpatialPane, MainWindow
-└── PageSpaceApp.java
+└── PageSpaceApp.kt
 ```
 
 ## Key Decisions
@@ -67,10 +67,16 @@ TDD: write a failing test first, then implement the minimum to pass, then refact
 ## Build & Run
 
 ```bash
-mvn test                          # run all tests (44 as of initial implementation)
+mvn test                          # run all tests (49 as of Kotlin port)
 mvn test -Dtest=ForceDirectedLayoutTest
 mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
 ```
+
+## TODO
+
+- **Spherical layout volume** (`ForceDirectedLayout`): replace the axis-aligned box boundary repulsion with a radial boundary centred on `(width/2, height/2, depth/2)` with radius `min(width, height) / 2`, so the node cloud forms a sphere rather than a box.
+- **Graph pruning on navigation** (`MainWindow`): when navigating to a new page, remove nodes that have no path of length ≤ N to the current page, so the graph doesn't grow unboundedly during a long browsing session.
+- **Node search / jump bar** (`MainWindow` / `SpatialPane`): add a `JTextField` above the spatial pane that filters visible node labels as the user types and navigates to the matching page on Enter.
 
 ## Extension Points
 

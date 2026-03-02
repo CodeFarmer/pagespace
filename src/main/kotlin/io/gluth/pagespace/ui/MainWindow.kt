@@ -27,6 +27,8 @@ class MainWindow(
         _spatialPane.setNavigationListener(this)
         _contentPane.setBackAction(::navigateBack)
 
+        // TODO: add a search/jump bar above the spatial pane — a JTextField that filters
+        //       visible node labels as you type and navigates to the selected page on Enter
         val splitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, _contentPane, _spatialPane)
         splitPane.resizeWeight = 1.0 / 3.0
         splitPane.dividerLocation = 400
@@ -70,6 +72,8 @@ class MainWindow(
                     return
                 }
 
+                // TODO: prune nodes that are too far from the current page (e.g. no path
+                //       of length ≤ N to the current page) so the graph doesn't grow unboundedly
                 for (linked in result.linkedPages) {
                     graph.addLink(Link(page, linked))
                 }
