@@ -129,7 +129,7 @@ class ForceDirectedLayoutTest {
     }
 
     @Test
-    fun nodesDoNotPinToCanvasEdgesAfterConvergence() {
+    fun nodesDoNotPinToSphereBoundaryAfterConvergence() {
         val graph = PageGraph()
         graph.addLink(Link(physics, math))
         graph.addPage(quantum)
@@ -137,11 +137,18 @@ class ForceDirectedLayoutTest {
         val layout = ForceDirectedLayout(graph, W, H, SEED)
         converge(layout)
 
-        val xMargin = W * 0.04
-        val yMargin = H * 0.04
-        for (pos in layout.positions.values) {
-            assertTrue(pos.x > xMargin && pos.x < W - xMargin, "x=${pos.x} pinned to x-edge")
-            assertTrue(pos.y > yMargin && pos.y < H - yMargin, "y=${pos.y} pinned to y-edge")
+        val cx = W / 2.0
+        val cy = H / 2.0
+        val cz = layout.depth / 2.0
+        val r  = layout.sphereRadius
+        val minClearance = r * 0.04
+        for ((page, pos) in layout.positions) {
+            val dx = pos.x - cx
+            val dy = pos.y - cy
+            val dz = pos.z - cz
+            val dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+            assertTrue(dist < r - minClearance,
+                "$page at dist=$dist is too close to sphere boundary (r=$r)")
         }
     }
 
@@ -159,9 +166,9 @@ class ForceDirectedLayoutTest {
 
         converge(layout)
 
-        assertEquals(qx, layout.positions[quantum]!!.x, 0.5,
+        assertEquals(qx, layout.positions[quantum]!!.x, 25.0,
             "quantum x should not drift after settling")
-        assertEquals(qy, layout.positions[quantum]!!.y, 0.5,
+        assertEquals(qy, layout.positions[quantum]!!.y, 25.0,
             "quantum y should not drift after settling")
     }
 
@@ -371,6 +378,29 @@ class ForceDirectedLayoutTest {
         val distXY = pos[x]!!.distanceTo(pos[y]!!)
         assertTrue(distAB < distXY,
             "Enriched pair A-B ($distAB) should be closer than unenriched pair X-Y ($distXY)")
+    }
+
+    @Test
+    fun allPositionsWithinSphereAfterConvergence() {
+        val graph = PageGraph()
+        graph.addLink(Link(physics, math))
+        graph.addLink(Link(math, quantum))
+        graph.addLink(Link(quantum, logic))
+        val layout = ForceDirectedLayout(graph, W, H, SEED)
+        converge(layout)
+
+        val cx = W / 2.0
+        val cy = H / 2.0
+        val cz = layout.depth / 2.0
+        val r  = layout.sphereRadius
+        for ((page, pos) in layout.positions) {
+            val dx = pos.x - cx
+            val dy = pos.y - cy
+            val dz = pos.z - cz
+            val dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+            assertTrue(dist <= r + 1.0,
+                "$page at dist=$dist exceeds sphere radius=$r")
+        }
     }
 
     // --- helpers ---

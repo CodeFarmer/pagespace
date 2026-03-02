@@ -21,7 +21,7 @@ class ForceDirectedLayout(
         private const val SETTLE_THRESHOLD = 4.0
         private const val FAST_DECAY       = 2
         private const val SETTLE_STEPS     = 40
-        private const val BOUNDARY_MARGIN  = 0.12
+        private const val SPHERE_MARGIN     = 0.12
         private const val BOUNDARY_STRENGTH = 50.0
         private const val TRANSITION_STEPS = 35
         private const val MAX_COMPUTE_ITERATIONS = 500
@@ -30,6 +30,10 @@ class ForceDirectedLayout(
     enum class Phase { IDLE, ANIMATING }
 
     val depth: Double = min(width, height)
+    val sphereRadius: Double = min(width, height) / 2.0
+    private val cx = width / 2.0
+    private val cy = height / 2.0
+    private val cz = depth / 2.0
     val transitionSteps: Int = TRANSITION_STEPS
 
     private val random = java.util.Random(seed)
@@ -80,13 +84,14 @@ class ForceDirectedLayout(
                 clamp(sy / cnt + (random.nextDouble() - 0.5) * j,       0.0, height),
                 clamp(sz / cnt + (random.nextDouble() - 0.5) * j * 0.4, 0.0, depth))
         }
-        val xm = width  * BOUNDARY_MARGIN
-        val ym = height * BOUNDARY_MARGIN
-        val zm = depth  * BOUNDARY_MARGIN
+        // Random point inside sphere (radius * 0.8 to keep away from boundary)
+        val r   = sphereRadius * 0.8 * cbrt(random.nextDouble())
+        val theta = random.nextDouble() * 2 * Math.PI
+        val phi   = Math.acos(2 * random.nextDouble() - 1)
         return NodePosition(
-            xm + random.nextDouble() * (width  - 2 * xm),
-            ym + random.nextDouble() * (height - 2 * ym),
-            zm + random.nextDouble() * (depth  - 2 * zm))
+            cx + r * Math.sin(phi) * Math.cos(theta),
+            cy + r * Math.sin(phi) * Math.sin(theta),
+            cz + r * Math.cos(phi))
     }
 
     fun setPinnedPage(page: Page) {
@@ -171,9 +176,7 @@ class ForceDirectedLayout(
         if (n == 0) return
 
         val k  = cbrt((width * height * depth) / max(n.toDouble(), 1.0))
-        val xm = width  * BOUNDARY_MARGIN
-        val ym = height * BOUNDARY_MARGIN
-        val zm = depth  * BOUNDARY_MARGIN
+        val innerRadius = sphereRadius * (1 - SPHERE_MARGIN)
 
         val forces = HashMap<Page, DoubleArray>()
         for (p in pageList) forces[p] = DoubleArray(3)
@@ -206,18 +209,19 @@ class ForceDirectedLayout(
             }
         }
 
-        // TODO: replace box boundary with spherical boundary so the layout volume is a sphere
-        //       (repel nodes whose distance from centre exceeds radius = min(width,height)/2)
-        // Quadratic boundary repulsion
+        // Spherical boundary repulsion: repel nodes that exceed the inner radius toward centre
         for (p in pageList) {
             if (p == pinnedPage) continue
             val pos = _positions[p]!!; val f = forces[p]!!
-            if (pos.x < xm)         { val t = (xm - pos.x) / xm;          f[0] += k * t * t * BOUNDARY_STRENGTH }
-            if (pos.x > width - xm) { val t = (pos.x - (width - xm)) / xm; f[0] -= k * t * t * BOUNDARY_STRENGTH }
-            if (pos.y < ym)         { val t = (ym - pos.y) / ym;          f[1] += k * t * t * BOUNDARY_STRENGTH }
-            if (pos.y > height - ym){ val t = (pos.y - (height - ym)) / ym; f[1] -= k * t * t * BOUNDARY_STRENGTH }
-            if (pos.z < zm)         { val t = (zm - pos.z) / zm;          f[2] += k * t * t * BOUNDARY_STRENGTH }
-            if (pos.z > depth - zm) { val t = (pos.z - (depth - zm)) / zm;  f[2] -= k * t * t * BOUNDARY_STRENGTH }
+            val dx = pos.x - cx; val dy = pos.y - cy; val dz = pos.z - cz
+            val dist = sqrt(dx * dx + dy * dy + dz * dz)
+            if (dist > innerRadius && dist > 0.001) {
+                val t = (dist - innerRadius) / (sphereRadius - innerRadius)
+                val mag = k * t * t * BOUNDARY_STRENGTH
+                f[0] -= (dx / dist) * mag
+                f[1] -= (dy / dist) * mag
+                f[2] -= (dz / dist) * mag
+            }
         }
 
         // Integrate: skip frozen nodes entirely

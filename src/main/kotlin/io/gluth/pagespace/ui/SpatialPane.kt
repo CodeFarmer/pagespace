@@ -6,10 +6,10 @@ import io.gluth.pagespace.layout.NodePosition
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.MouseMotionAdapter
 import javax.swing.JPanel
 import javax.swing.Timer
-import kotlin.math.hypot
-import kotlin.math.max
+import kotlin.math.*
 
 class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
 
@@ -21,24 +21,65 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         private val EDGE_COLOR  = Color(140, 160, 200)
         private val LABEL_COLOR = Color(220, 225, 245)
         private const val MIN_ALPHA = 0.20
+        private const val DRAG_SENSITIVITY = 0.005
+        private const val DRAG_THRESHOLD   = 5
+        private const val VIEW_RESET_SPEED = 0.08
+        private const val VIEW_RESET_SNAP  = 0.001
     }
 
     private var currentPage: Page? = null
     private var navigationListener: NavigationListener? = null
+
+    private var viewYaw   = 0.0
+    private var viewPitch = 0.0
+    private var resettingView = false
+
+    private var dragStartX = 0
+    private var dragStartY = 0
+    private var dragging   = false
 
     init {
         background = Color(18, 20, 35)
 
         val timer = Timer(30) {
             layout.step()
+            if (resettingView) {
+                viewYaw   *= (1 - VIEW_RESET_SPEED)
+                viewPitch *= (1 - VIEW_RESET_SPEED)
+                if (abs(viewYaw) < VIEW_RESET_SNAP && abs(viewPitch) < VIEW_RESET_SNAP) {
+                    viewYaw = 0.0; viewPitch = 0.0; resettingView = false
+                }
+            }
             repaint()
         }
         timer.start()
 
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                val nearest = nearestPage(e.x, e.y)
-                if (nearest != null) navigationListener?.navigateTo(nearest)
+            override fun mousePressed(e: MouseEvent) {
+                dragStartX = e.x
+                dragStartY = e.y
+                dragging = false
+            }
+            override fun mouseReleased(e: MouseEvent) {
+                if (!dragging) {
+                    val nearest = nearestPage(e.x, e.y)
+                    if (nearest != null) navigationListener?.navigateTo(nearest)
+                }
+            }
+        })
+        addMouseMotionListener(object : MouseMotionAdapter() {
+            override fun mouseDragged(e: MouseEvent) {
+                val dx = e.x - dragStartX
+                val dy = e.y - dragStartY
+                if (!dragging && hypot(dx.toDouble(), dy.toDouble()) < DRAG_THRESHOLD) return
+                dragging = true
+                resettingView = false
+                viewYaw   += dx * DRAG_SENSITIVITY
+                viewPitch += dy * DRAG_SENSITIVITY
+                viewPitch  = viewPitch.coerceIn(-Math.PI / 2, Math.PI / 2)
+                dragStartX = e.x
+                dragStartY = e.y
+                repaint()
             }
         })
     }
@@ -49,6 +90,9 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
 
     fun setCurrentPage(page: Page) {
         currentPage = page
+        if (abs(viewYaw) > VIEW_RESET_SNAP || abs(viewPitch) > VIEW_RESET_SNAP) {
+            resettingView = true
+        }
         repaint()
     }
 
@@ -63,19 +107,23 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         val positions = layout.positions
         if (positions.isEmpty()) return
 
-        // Sort back-to-front (largest z first)
-        val entries = positions.entries.sortedByDescending { it.value.z }
+        // Pre-compute rotated coordinates for all nodes
+        val rotated = LinkedHashMap<Page, DoubleArray>()
+        for ((page, np) in positions) rotated[page] = viewTransform(np)
+
+        // Sort back-to-front by rotated z (largest first)
+        val entries = rotated.entries.sortedByDescending { it.value[2] }
 
         // Draw edges first
         g2.stroke = BasicStroke(1.0f)
         for (entry in entries) {
-            val src = entry.key
+            val src = entry.key; val sr = entry.value
             for (tgt in layout.graph.linksFrom(src)) {
-                val tp = positions[tgt] ?: continue
-                val avgZ  = (entry.value.z + tp.z) / 2.0
+                val tr = rotated[tgt] ?: continue
+                val avgZ  = (sr[2] + tr[2]) / 2.0
                 val alpha = alphaFor(avgZ).toFloat()
-                val sp    = project(entry.value)
-                val ep    = project(tp)
+                val sp    = project(sr[0], sr[1], sr[2])
+                val ep    = project(tr[0], tr[1], tr[2])
                 g2.color  = withAlpha(EDGE_COLOR, alpha * 0.55f)
                 g2.drawLine(sp[0], sp[1], ep[0], ep[1])
             }
@@ -85,12 +133,12 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         val baseFont = font
         for (entry in entries) {
             val page  = entry.key
-            val np    = entry.value
+            val r3    = entry.value
             val curr  = page == currentPage
 
-            val scale = perspScale(np.z)
-            val alpha = alphaFor(np.z).toFloat()
-            val sc    = project(np)
+            val scale = perspScale(r3[2])
+            val alpha = alphaFor(r3[2]).toFloat()
+            val sc    = project(r3[0], r3[1], r3[2])
             val cx    = sc[0]; val cy = sc[1]
             val r     = max(4, (BASE_RADIUS * scale).toInt())
 
@@ -120,9 +168,10 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         var nearest: Page? = null
         var minDist = CLICK_RADIUS.toDouble()
         for ((page, np) in positions) {
-            val sc   = project(np)
+            val r3   = viewTransform(np)
+            val sc   = project(r3[0], r3[1], r3[2])
             val dist = hypot((mx - sc[0]).toDouble(), (my - sc[1]).toDouble())
-            val r    = BASE_RADIUS * perspScale(np.z)
+            val r    = BASE_RADIUS * perspScale(r3[2])
             if (dist < max(r, CLICK_RADIUS / 2.0) && dist < minDist) {
                 minDist = dist
                 nearest = page
@@ -130,7 +179,8 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         }
         if (nearest == null) {
             for ((page, np) in positions) {
-                val sc   = project(np)
+                val r3   = viewTransform(np)
+                val sc   = project(r3[0], r3[1], r3[2])
                 val dist = hypot((mx - sc[0]).toDouble(), (my - sc[1]).toDouble())
                 if (dist < CLICK_RADIUS && dist < minDist) {
                     minDist = dist
@@ -141,16 +191,42 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         return nearest
     }
 
+    // ---------------------------------------------------- view transform
+
+    /** Rotates a world position around the sphere centre by viewYaw/viewPitch. Returns [rx, ry, rz]. */
+    private fun viewTransform(np: NodePosition): DoubleArray {
+        val ocx = layout.width  / 2.0
+        val ocy = layout.height / 2.0
+        val ocz = layout.depth  / 2.0
+
+        // translate to origin
+        var x = np.x - ocx
+        var y = np.y - ocy
+        var z = np.z - ocz
+
+        // yaw: rotate around Y axis
+        val cosY = cos(viewYaw); val sinY = sin(viewYaw)
+        val x1 = x * cosY + z * sinY
+        val z1 = -x * sinY + z * cosY
+
+        // pitch: rotate around X axis
+        val cosP = cos(viewPitch); val sinP = sin(viewPitch)
+        val y2 = y * cosP - z1 * sinP
+        val z2 = y * sinP + z1 * cosP
+
+        return doubleArrayOf(x1 + ocx, y2 + ocy, z2 + ocz)
+    }
+
     // ------------------------------------------------------------ projection
 
-    private fun project(np: NodePosition): IntArray {
+    private fun project(rx: Double, ry: Double, rz: Double): IntArray {
         val pw = width.toDouble()
         val ph = height.toDouble()
         val cx = pw / 2.0
         val cy = ph / 2.0
-        val bx = np.x * pw / layout.width
-        val by = np.y * ph / layout.height
-        val s  = perspScale(np.z)
+        val bx = rx * pw / layout.width
+        val by = ry * ph / layout.height
+        val s  = perspScale(rz)
         return intArrayOf((cx + (bx - cx) * s).toInt(), (cy + (by - cy) * s).toInt())
     }
 

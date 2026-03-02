@@ -39,7 +39,7 @@ src/main/kotlin/io/gluth/pagespace/
 - Fruchterman-Reingold: repulsion between all pairs + attraction along edges weighted by `(1 + sharedLinkCount)`
 - Forces and velocities are 3-dimensional; depth = `min(width, height)`
 - Velocity + damping (`BASE_DAMPING = 0.75`) replaces temperature cooling
-- **Quadratic boundary repulsion** (`BOUNDARY_STRENGTH = 50`, margin = 12 % of each dimension) prevents nodes from pinning to canvas edges
+- **Spherical boundary repulsion** (`BOUNDARY_STRENGTH = 50`, `SPHERE_MARGIN = 0.12`): nodes are confined to a sphere centred on `(width/2, height/2, depth/2)` with radius `min(width, height) / 2`. Quadratic repulsion toward the centre kicks in when a node exceeds 88 % of the radius, producing a natural spherical cloud.
 - **Adaptive settling**: per-node still-counter driven by velocity-reversal detection. Each direction reversal applies `REVERSAL_DAMP = 0.45×` and adds `REVERSAL_CREDIT = 8` to the counter; slow motion increments it by 1; fast motion without reversal decrements it by `FAST_DECAY = 2`. When the counter reaches `SETTLE_STEPS = 40` the velocity is zeroed and force updates are skipped entirely — frozen nodes cannot be re-woken by residual forces.
 - **Compute-then-animate**: two-phase state machine (`Phase.IDLE` / `Phase.ANIMATING`). `computeEquilibrium()` runs `stepForces()` in a tight loop (up to `MAX_COMPUTE_ITERATIONS = 500`) until all non-pinned nodes settle, snapshots start/target positions, then enters `ANIMATING`. `step()` is a no-op in `IDLE`; in `ANIMATING` it smoothstep-interpolates all nodes from start to target over `TRANSITION_STEPS = 35` frames. `setPinnedPage(page)` just sets the pinned page — the pinned node is clamped to centre during `stepForces()`, so the equilibrium already has it at `(width/2, height/2, 0)`.
 - New nodes spawned by `syncWithGraph()` are placed near the centroid of their already-positioned neighbours (with jitter), falling back to a random interior position.
@@ -75,7 +75,6 @@ mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
 
 ## TODO
 
-- **Spherical layout volume** (`ForceDirectedLayout`): replace the axis-aligned box boundary repulsion with a radial boundary centred on `(width/2, height/2, depth/2)` with radius `min(width, height) / 2`, so the node cloud forms a sphere rather than a box.
 - **Graph pruning on navigation** (`MainWindow`): when navigating to a new page, remove nodes that have no path of length ≤ N to the current page, so the graph doesn't grow unboundedly during a long browsing session.
 - **Node search / jump bar** (`MainWindow` / `SpatialPane`): add a `JTextField` above the spatial pane that filters visible node labels as the user types and navigates to the matching page on Enter.
 - **Package as an Android app**
