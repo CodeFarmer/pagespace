@@ -99,8 +99,19 @@ class ForceDirectedLayout(
     }
 
     fun syncWithGraph() {
+        val graphPages = graph.pages()
+
+        // Remove nodes no longer in graph
+        val stale = _positions.keys.filter { it !in graphPages }
+        for (p in stale) {
+            _positions.remove(p)
+            velocities.remove(p)
+            stillCounts.remove(p)
+        }
+
+        // Add new nodes
         var added = false
-        for (page in graph.pages()) {
+        for (page in graphPages) {
             if (!_positions.containsKey(page)) {
                 _positions[page]   = spawnPosition(page)
                 velocities[page]   = DoubleArray(3)
@@ -108,7 +119,7 @@ class ForceDirectedLayout(
                 added = true
             }
         }
-        if (added) wakeAll()
+        if (added || stale.isNotEmpty()) wakeAll()
     }
 
     private fun wakeAll() {

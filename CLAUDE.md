@@ -51,12 +51,15 @@ src/main/kotlin/io/gluth/pagespace/
 - Node radius and label font size scale with the perspective factor.
 - 30 ms Swing `Timer` calls `layout.step()` then `repaint()`.
 
+### Importance-ranked links & density control
+`WikipediaContentBackend.fetchLinks()` ranks links by importance: lead-section paragraph links (extracted from the `action=parse&section=0` API via `WikipediaResponseParser.parseLeadSectionLinks()`) come first, followed by remaining links from the `prop=links` API (`pllimit=100`). The full ranked list is returned; `MainWindow` truncates it to `linkDensity` (default 20, range 5–50, adjustable via +/- buttons on the spatial pane). Density also scales second-order enrichment: each neighbor's link list is truncated to `linkDensity`, and bridge nodes are capped at `min(linkDensity, MAX_SECOND_ORDER_NODES)`. The "See also" section is built by `MainWindow` from the truncated list. `fetchBody` returns only the cleaned article extract.
+
 ### Navigation flow (`MainWindow`)
-1. `backend.fetchLinks(id)` → merge into `PageGraph`
+1. `backend.fetchLinks(id)` → importance-ranked list, truncated to `linkDensity` → merge into `PageGraph`
 2. `layout.syncWithGraph()` — spawn positions for new nodes
 3. `layout.setPinnedPage(page)` — mark page as pinned (centred in next equilibrium)
 4. `layout.computeEquilibrium()` — compute converged positions, start smooth animation
-5. `backend.fetchBody(id)` → push to `ContentPane`
+5. `backend.fetchBody(id)` → `MainWindow` appends "See also" section → push to `ContentPane`
 6. `spatialPane.setCurrentPage(page)` — highlight current node
 
 All steps run on the EDT.
@@ -78,7 +81,6 @@ mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
 - **Graph pruning on navigation** (`MainWindow`): when navigating to a new page, remove nodes that have no path of length ≤ N to the current page, so the graph doesn't grow unboundedly during a long browsing session.
 - **Node search / jump bar** (`MainWindow` / `SpatialPane`): add a `JTextField` above the spatial pane that filters visible node labels as the user types and navigates to the matching page on Enter.
 - **Package as an Android app**
-- **Better node choice**: instead of the first n neighbours alphabetically, heuristically find out which ones are important and also give an option to increase or decrease the neighbour fetching density.
 
 ## Extension Points
 

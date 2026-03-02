@@ -403,6 +403,24 @@ class ForceDirectedLayoutTest {
         }
     }
 
+    @Test
+    fun syncWithGraphRemovesStaleNodes() {
+        val graph = PageGraph()
+        graph.addLink(Link(physics, math))
+        graph.addLink(Link(physics, quantum))
+        val layout = ForceDirectedLayout(graph, W, H, SEED)
+        assertEquals(3, layout.positions.size)
+
+        graph.removeLink(Link(physics, quantum))
+        graph.removePage(quantum)
+        layout.syncWithGraph()
+
+        assertEquals(2, layout.positions.size)
+        assertNotNull(layout.positions[physics])
+        assertNotNull(layout.positions[math])
+        assertTrue(quantum !in layout.positions)
+    }
+
     // --- helpers ---
 
     private fun converge(layout: ForceDirectedLayout) {

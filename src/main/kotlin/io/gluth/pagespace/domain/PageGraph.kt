@@ -17,6 +17,11 @@ class PageGraph {
         inEdges[link.target]!!.add(link.source)
     }
 
+    fun removeLink(link: Link) {
+        outEdges[link.source]?.remove(link.target)
+        inEdges[link.target]?.remove(link.source)
+    }
+
     fun removePage(page: Page) {
         val targets = outEdges.remove(page)
         targets?.forEach { t -> inEdges.getOrDefault(t, mutableSetOf()).remove(page) }

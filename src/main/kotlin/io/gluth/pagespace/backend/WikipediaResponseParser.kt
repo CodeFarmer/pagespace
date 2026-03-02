@@ -1,5 +1,6 @@
 package io.gluth.pagespace.backend
 
+import java.net.URLDecoder
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -8,6 +9,26 @@ internal object WikipediaResponseParser {
     fun parseSummaryTitle(json: String): String = JSONObject(json).getString("title")
 
     fun parseSummaryExtractHtml(json: String): String = JSONObject(json).optString("extract_html", "")
+
+    private val PARAGRAPH_PATTERN = Regex("<p>(.*?)</p>", RegexOption.DOT_MATCHES_ALL)
+    private val WIKI_LINK_PATTERN = Regex("""href="/wiki/([^"#:]+)"""")
+
+    fun parseLeadSectionLinks(json: String): List<String> {
+        val textObj = JSONObject(json).optJSONObject("parse")
+            ?.optJSONObject("text") ?: return emptyList()
+        val html = textObj.optString("*", "")
+        if (html.isEmpty()) return emptyList()
+
+        val seen = LinkedHashSet<String>()
+        for (pMatch in PARAGRAPH_PATTERN.findAll(html)) {
+            for (linkMatch in WIKI_LINK_PATTERN.findAll(pMatch.groupValues[1])) {
+                val raw = linkMatch.groupValues[1]
+                val title = URLDecoder.decode(raw, "UTF-8").replace('_', ' ')
+                seen.add(title)
+            }
+        }
+        return seen.toList()
+    }
 
     fun parseLinks(json: String): List<String> {
         val titles = mutableListOf<String>()

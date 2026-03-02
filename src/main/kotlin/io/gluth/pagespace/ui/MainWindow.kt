@@ -6,7 +6,9 @@ import io.gluth.pagespace.domain.Link
 import io.gluth.pagespace.domain.Page
 import io.gluth.pagespace.domain.PageGraph
 import io.gluth.pagespace.layout.ForceDirectedLayout
+import java.awt.BorderLayout
 import java.awt.Dimension
+import java.awt.FlowLayout
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.*
@@ -19,21 +21,59 @@ class MainWindow(
 
     companion object {
         private const val MAX_SECOND_ORDER_NODES = 30
+        private const val MIN_LINK_DENSITY = 5
+        private const val MAX_LINK_DENSITY = 50
+        private const val DENSITY_STEP = 5
     }
 
     private val _contentPane = ContentPane()
     private val _spatialPane = SpatialPane(layout)
     private val history: ArrayDeque<Page> = ArrayDeque()
     private val navGeneration = AtomicInteger(0)
+    private var linkDensity = 20
+    private val densityLabel = JLabel("20")
+    private var currentPage: Page? = null
+    private var currentFullLinks: List<Page> = emptyList()
+    private var currentBody: String = ""
 
     init {
         _contentPane.setNavigationListener(this)
         _spatialPane.setNavigationListener(this)
         _contentPane.setBackAction(::navigateBack)
 
+        val minusButton = JButton("-").apply {
+            addActionListener {
+                if (linkDensity > MIN_LINK_DENSITY) {
+                    linkDensity -= DENSITY_STEP
+                    densityLabel.text = linkDensity.toString()
+                    applyDensity()
+                }
+            }
+        }
+        val plusButton = JButton("+").apply {
+            addActionListener {
+                if (linkDensity < MAX_LINK_DENSITY) {
+                    linkDensity += DENSITY_STEP
+                    densityLabel.text = linkDensity.toString()
+                    applyDensity()
+                }
+            }
+        }
+        val densityPanel = JPanel(FlowLayout(FlowLayout.CENTER, 4, 2)).apply {
+            add(JLabel("Link density:"))
+            add(minusButton)
+            add(densityLabel)
+            add(plusButton)
+        }
+
+        val spatialWrapper = JPanel(BorderLayout()).apply {
+            add(_spatialPane, BorderLayout.CENTER)
+            add(densityPanel, BorderLayout.SOUTH)
+        }
+
         // TODO: add a search/jump bar above the spatial pane — a JTextField that filters
         //       visible node labels as you type and navigates to the selected page on Enter
-        val splitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, _contentPane, _spatialPane)
+        val splitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, _contentPane, spatialWrapper)
         splitPane.resizeWeight = 1.0 / 3.0
         splitPane.dividerLocation = 400
 
@@ -78,7 +118,12 @@ class MainWindow(
 
                 // TODO: prune nodes that are too far from the current page (e.g. no path
                 //       of length ≤ N to the current page) so the graph doesn't grow unboundedly
-                for (linked in result.linkedPages) {
+                currentPage = page
+                currentFullLinks = result.linkedPages
+                currentBody = result.body
+
+                val truncated = result.linkedPages.take(linkDensity)
+                for (linked in truncated) {
                     graph.addLink(Link(page, linked))
                 }
                 layout.syncWithGraph()
@@ -86,10 +131,10 @@ class MainWindow(
                 layout.computeEquilibrium()
 
                 history.push(page)
-                _contentPane.setContent(page, result.body)
+                _contentPane.setContent(page, buildSeeAlso(result.body, truncated))
                 _spatialPane.setCurrentPage(page)
 
-                launchSecondOrderEnrichment(page, result.linkedPages, myGen)
+                launchSecondOrderEnrichment(page, truncated, myGen, linkDensity)
             }
         }
 
@@ -99,7 +144,8 @@ class MainWindow(
     private fun launchSecondOrderEnrichment(
         centerPage: Page,
         firstOrderNeighbors: List<Page>,
-        generation: Int
+        generation: Int,
+        density: Int
     ) {
         val worker = object : SwingWorker<SecondOrderResult, Void>() {
             override fun doInBackground(): SecondOrderResult {
@@ -107,7 +153,7 @@ class MainWindow(
                 for (neighbor in firstOrderNeighbors) {
                     if (navGeneration.get() != generation) return SecondOrderResult(emptyMap())
                     try {
-                        neighborLinks[neighbor] = backend.fetchLinks(neighbor.id)
+                        neighborLinks[neighbor] = backend.fetchLinks(neighbor.id).take(density)
                     } catch (_: PageNotFoundException) {
                         // skip unreachable neighbors
                     }
@@ -147,10 +193,11 @@ class MainWindow(
                     }
                 }
 
+                val maxBridge = minOf(density, MAX_SECOND_ORDER_NODES)
                 val bridgeNodes = candidateCounts.entries
                     .filter { it.value >= 2 }
                     .sortedByDescending { it.value }
-                    .take(MAX_SECOND_ORDER_NODES)
+                    .take(maxBridge)
                     .map { it.key }
                     .toSet()
 
@@ -179,6 +226,64 @@ class MainWindow(
                 history.pop()
                 navigateTo(previous)
             }
+        }
+    }
+
+    private fun applyDensity() {
+        val page = currentPage ?: return
+        if (currentFullLinks.isEmpty()) return
+
+        val desired = currentFullLinks.take(linkDensity)
+        val desiredSet = desired.toSet()
+        val fullSet = currentFullLinks.toSet()
+
+        // Remove first-order links beyond the new cutoff
+        for (target in graph.linksFrom(page).toList()) {
+            if (target in fullSet && target !in desiredSet) {
+                graph.removeLink(Link(page, target))
+            }
+        }
+
+        // Add first-order links within the cutoff
+        for (target in desired) {
+            graph.addLink(Link(page, target))
+        }
+
+        // Remove orphaned pages (no in-edges, not the current page)
+        removeOrphans(page)
+
+        layout.syncWithGraph()
+        layout.setPinnedPage(page)
+        layout.computeEquilibrium()
+
+        _contentPane.setContent(page, buildSeeAlso(currentBody, desired))
+        _spatialPane.setCurrentPage(page)
+    }
+
+    private fun removeOrphans(keep: Page) {
+        var changed = true
+        while (changed) {
+            changed = false
+            for (p in graph.pages()) {
+                if (p != keep && graph.linksTo(p).isEmpty()) {
+                    graph.removePage(p)
+                    changed = true
+                    break
+                }
+            }
+        }
+    }
+
+    private fun buildSeeAlso(body: String, links: List<Page>): String {
+        if (links.isEmpty()) return body
+        return buildString {
+            append(body)
+            append("<hr><p><b>See also:</b> ")
+            links.forEachIndexed { i, p ->
+                append("<a href=\"${p.id}\">${p.title}</a>")
+                if (i < links.size - 1) append(", ")
+            }
+            append("</p>")
         }
     }
 

@@ -77,4 +77,91 @@ class WikipediaResponseParserTest {
         val html = WikipediaResponseParser.parseSummaryExtractHtml(json)
         assertEquals("", html)
     }
+
+    @Test
+    fun parseLeadSectionLinksExtractsTitlesInOrder() {
+        val json = """
+            {
+              "parse": {
+                "title": "Physics",
+                "text": {
+                  "*": "<div><p><b>Physics</b> is the <a href=\"/wiki/Natural_science\">natural science</a> of <a href=\"/wiki/Matter\">matter</a> and <a href=\"/wiki/Fundamental_interaction\">fundamental interactions</a>.</p></div>"
+                }
+              }
+            }
+        """.trimIndent()
+        val links = WikipediaResponseParser.parseLeadSectionLinks(json)
+        assertEquals(listOf("Natural science", "Matter", "Fundamental interaction"), links)
+    }
+
+    @Test
+    fun parseLeadSectionLinksDeduplicates() {
+        val json = """
+            {
+              "parse": {
+                "title": "Physics",
+                "text": {
+                  "*": "<p><a href=\"/wiki/Matter\">matter</a> and <a href=\"/wiki/Matter\">matter again</a></p>"
+                }
+              }
+            }
+        """.trimIndent()
+        val links = WikipediaResponseParser.parseLeadSectionLinks(json)
+        assertEquals(listOf("Matter"), links)
+    }
+
+    @Test
+    fun parseLeadSectionLinksIgnoresNonArticleLinks() {
+        val json = """
+            {
+              "parse": {
+                "title": "Physics",
+                "text": {
+                  "*": "<p><a href=\"/wiki/Matter\">matter</a> and <a href=\"/wiki/Help:Contents\">help</a> and <a href=\"/wiki/Energy#Forms\">energy</a></p>"
+                }
+              }
+            }
+        """.trimIndent()
+        val links = WikipediaResponseParser.parseLeadSectionLinks(json)
+        assertEquals(listOf("Matter"), links)
+    }
+
+    @Test
+    fun parseLeadSectionLinksReturnsEmptyForNoLinks() {
+        val json = """
+            {
+              "parse": {
+                "title": "Physics",
+                "text": {
+                  "*": "<p>Physics is a science.</p>"
+                }
+              }
+            }
+        """.trimIndent()
+        val links = WikipediaResponseParser.parseLeadSectionLinks(json)
+        assertTrue(links.isEmpty())
+    }
+
+    @Test
+    fun parseLeadSectionLinksReturnsEmptyForMissingParseKey() {
+        val json = """{"title": "Physics"}"""
+        val links = WikipediaResponseParser.parseLeadSectionLinks(json)
+        assertTrue(links.isEmpty())
+    }
+
+    @Test
+    fun parseLeadSectionLinksDecodesUrlEncodedTitles() {
+        val json = """
+            {
+              "parse": {
+                "title": "Physics",
+                "text": {
+                  "*": "<p><a href=\"/wiki/Maxwell%27s_equations\">Maxwell's equations</a></p>"
+                }
+              }
+            }
+        """.trimIndent()
+        val links = WikipediaResponseParser.parseLeadSectionLinks(json)
+        assertEquals(listOf("Maxwell's equations"), links)
+    }
 }

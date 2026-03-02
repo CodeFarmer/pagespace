@@ -103,4 +103,26 @@ class PageGraphTest {
         assertTrue(pages.contains(math))
         assertEquals(2, pages.size)
     }
+
+    @Test
+    fun removeLinkRemovesDirectedEdgeOnly() {
+        graph.addLink(Link(physics, math))
+        graph.addLink(Link(physics, quantum))
+        graph.removeLink(Link(physics, math))
+        assertEquals(1, graph.linkCount())
+        assertFalse(graph.linksFrom(physics).contains(math))
+        assertTrue(graph.linksFrom(physics).contains(quantum))
+        // Both pages still exist
+        assertEquals(3, graph.pageCount())
+    }
+
+    @Test
+    fun removeLinkUpdatesInEdges() {
+        graph.addLink(Link(physics, math))
+        graph.addLink(Link(quantum, math))
+        graph.removeLink(Link(physics, math))
+        val sources = graph.linksTo(math)
+        assertFalse(sources.contains(physics))
+        assertTrue(sources.contains(quantum))
+    }
 }
