@@ -6,7 +6,7 @@ import java.util.Collections
 import kotlin.math.*
 
 class ForceDirectedLayout(
-    val graph: PageGraph,
+    internal val graph: PageGraph,
     val width: Double,
     val height: Double,
     seed: Long = System.nanoTime()
@@ -58,6 +58,8 @@ class ForceDirectedLayout(
     init {
         initPositions()
     }
+
+    fun edgesFrom(page: Page): Set<Page> = graph.linksFrom(page)
 
     private fun initPositions() {
         for (page in graph.pages()) {
@@ -189,41 +191,48 @@ class ForceDirectedLayout(
         val k  = cbrt((width * height * depth) / max(n.toDouble(), 1.0))
         val innerRadius = sphereRadius * (1 - SPHERE_MARGIN)
 
-        val forces = HashMap<Page, DoubleArray>()
+        val forces = HashMap<Page, DoubleArray>(n * 2)
         for (p in pageList) forces[p] = DoubleArray(3)
 
         // Repulsion between all pairs
         for (i in 0 until n) {
-            val u = pageList[i]; val pu = _positions[u]!!
+            val u = pageList[i]
+            val pu = _positions[u] ?: continue
+            val fu = forces[u] ?: continue
             for (j in i + 1 until n) {
-                val v = pageList[j]; val pv = _positions[v]!!
+                val v = pageList[j]
+                val pv = _positions[v] ?: continue
+                val fv = forces[v] ?: continue
                 val dx = pu.x - pv.x; val dy = pu.y - pv.y; val dz = pu.z - pv.z
                 val dist = max(sqrt(dx * dx + dy * dy + dz * dz), 0.001)
                 val rep = (k * k) / dist
-                val fu = forces[u]!!; val fv = forces[v]!!
-                fu[0] += (dx / dist) * rep; fu[1] += (dy / dist) * rep; fu[2] += (dz / dist) * rep
-                fv[0] -= (dx / dist) * rep; fv[1] -= (dy / dist) * rep; fv[2] -= (dz / dist) * rep
+                val rx = (dx / dist) * rep; val ry = (dy / dist) * rep; val rz = (dz / dist) * rep
+                fu[0] += rx; fu[1] += ry; fu[2] += rz
+                fv[0] -= rx; fv[1] -= ry; fv[2] -= rz
             }
         }
 
         // Attraction along edges weighted by shared-link count
         for (u in pageList) {
             for (v in graph.linksFrom(u)) {
-                if (!_positions.containsKey(v)) continue
-                val pu = _positions[u]!!; val pv = _positions[v]!!
+                val pu = _positions[u] ?: continue
+                val pv = _positions[v] ?: continue
+                val fu = forces[u] ?: continue
+                val fv = forces[v] ?: continue
                 val dx = pu.x - pv.x; val dy = pu.y - pv.y; val dz = pu.z - pv.z
                 val dist = max(sqrt(dx * dx + dy * dy + dz * dz), 0.001)
                 val att = (dist * dist) / k * (1.0 + graph.sharedLinkCount(u, v))
-                val fu = forces[u]!!; val fv = forces[v]!!
-                fu[0] -= (dx / dist) * att; fu[1] -= (dy / dist) * att; fu[2] -= (dz / dist) * att
-                fv[0] += (dx / dist) * att; fv[1] += (dy / dist) * att; fv[2] += (dz / dist) * att
+                val ax = (dx / dist) * att; val ay = (dy / dist) * att; val az = (dz / dist) * att
+                fu[0] -= ax; fu[1] -= ay; fu[2] -= az
+                fv[0] += ax; fv[1] += ay; fv[2] += az
             }
         }
 
         // Spherical boundary repulsion: repel nodes that exceed the inner radius toward centre
         for (p in pageList) {
             if (p == pinnedPage) continue
-            val pos = _positions[p]!!; val f = forces[p]!!
+            val pos = _positions[p] ?: continue
+            val f = forces[p] ?: continue
             val dx = pos.x - cx; val dy = pos.y - cy; val dz = pos.z - cz
             val dist = sqrt(dx * dx + dy * dy + dz * dz)
             if (dist > innerRadius && dist > 0.001) {
@@ -242,8 +251,9 @@ class ForceDirectedLayout(
             var count = stillCounts.getOrDefault(p, 0)
             if (count >= SETTLE_STEPS) continue
 
-            val f = forces[p]!!; val vel = velocities[p]!!
-            val pos = _positions[p]!!
+            val f = forces[p] ?: continue
+            val vel = velocities[p] ?: continue
+            val pos = _positions[p] ?: continue
 
             val pv0 = vel[0]; val pv1 = vel[1]; val pv2 = vel[2]
 

@@ -62,11 +62,13 @@ class ContentPane : JPanel() {
 
     private fun applyFont() {
         bodyPane.font = Font("SansSerif", Font.PLAIN, fontSize)
-        // Also push the size into the stylesheet so <p>, <h1> etc. scale together
+        // Replace the stylesheet so rules don't accumulate across font size changes
         val kit = bodyPane.editorKit as? HTMLEditorKit ?: return
-        kit.styleSheet.addRule("body { font-family: SansSerif, Arial, sans-serif; font-size: ${fontSize}pt; }")
-        kit.styleSheet.addRule("h1 { font-size: ${fontSize + 6}pt; }")
-        kit.styleSheet.addRule("h2 { font-size: ${fontSize + 3}pt; }")
+        val fresh = javax.swing.text.html.StyleSheet()
+        fresh.addRule("body { font-family: SansSerif, Arial, sans-serif; font-size: ${fontSize}pt; }")
+        fresh.addRule("h1 { font-size: ${fontSize + 6}pt; }")
+        fresh.addRule("h2 { font-size: ${fontSize + 3}pt; }")
+        kit.styleSheet = fresh
     }
 
     private fun adjustFontSize(delta: Int) {

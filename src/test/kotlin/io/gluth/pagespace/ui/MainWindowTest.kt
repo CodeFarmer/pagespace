@@ -15,6 +15,7 @@ import javax.swing.SwingUtilities
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 @DisabledIf("io.gluth.pagespace.ui.MainWindowTest#isHeadless")
 class MainWindowTest {
@@ -39,6 +40,18 @@ class MainWindowTest {
         return ref.get()
     }
 
+    private fun navigateAndWait(window: MainWindow, page: Page) {
+        val latch = CountDownLatch(1)
+        SwingUtilities.invokeLater {
+            window.navigateTo(page)
+            // Schedule countdown after current EDT events complete
+            SwingUtilities.invokeLater { latch.countDown() }
+        }
+        latch.await(5, TimeUnit.SECONDS)
+        // Allow SwingWorker to complete
+        Thread.sleep(300)
+    }
+
     @Test
     fun splitPaneExists() {
         val window = createWindow()
@@ -51,14 +64,79 @@ class MainWindowTest {
         val window  = createWindow()
         val physics = Page("mock:physics", "Physics")
 
+        navigateAndWait(window, physics)
+
+        assertEquals("Physics", window.contentPane().currentPageTitle())
+    }
+
+    @Test
+    fun historyGrowsOnNavigation() {
+        val window  = createWindow()
+        val physics = Page("mock:physics", "Physics")
+        val math    = Page("mock:math", "Mathematics")
+
+        navigateAndWait(window, physics)
+        navigateAndWait(window, math)
+
+        val pages = window.historyPages()
+        assertEquals(2, pages.size)
+        assertEquals(physics, pages[0])
+        assertEquals(math, pages[1])
+        assertEquals(1, window.historyIndex())
+    }
+
+    @Test
+    fun navigateBackDoesNotLoseHistoryEntries() {
+        val window  = createWindow()
+        val physics = Page("mock:physics", "Physics")
+        val math    = Page("mock:math", "Mathematics")
+        val quantum = Page("mock:quantum", "Quantum Mechanics")
+
+        navigateAndWait(window, physics)
+        navigateAndWait(window, math)
+        navigateAndWait(window, quantum)
+
+        assertEquals(3, window.historyPages().size)
+        assertEquals(2, window.historyIndex())
+
+        // Simulate back navigation via reflection (navigateBack is private)
+        val backMethod = MainWindow::class.java.getDeclaredMethod("navigateBack")
+        backMethod.isAccessible = true
+
         val latch = CountDownLatch(1)
         SwingUtilities.invokeLater {
-            window.navigateTo(physics)
+            backMethod.invoke(window)
             SwingUtilities.invokeLater { latch.countDown() }
         }
         latch.await(5, TimeUnit.SECONDS)
-        Thread.sleep(200)
+        Thread.sleep(300)
 
-        assertEquals("Physics", window.contentPane().currentPageTitle())
+        // History should still have 3 entries, but index should be 1 (pointing to math)
+        assertEquals(3, window.historyPages().size)
+        assertEquals(1, window.historyIndex())
+    }
+
+    @Test
+    fun seeAlsoEscapesHtmlEntities() {
+        // Test through buildSeeAlso via reflection
+        val window = createWindow()
+        val buildMethod = MainWindow::class.java.getDeclaredMethod(
+            "buildSeeAlso", String::class.java, List::class.java
+        )
+        buildMethod.isAccessible = true
+
+        val links = listOf(
+            Page("AT&T", "AT&T"),
+            Page("A<B", "A<B"),
+            Page("Gödel's theorem", "Gödel's theorem")
+        )
+        val result = buildMethod.invoke(window, "<p>body</p>", links) as String
+
+        assertTrue(result.contains("AT&amp;T"))
+        assertTrue(result.contains("A&lt;B"))
+        assertTrue(result.contains("G\u00f6del&#39;s theorem"))
+        // Should not contain unescaped special chars in href or text
+        assertTrue(!result.contains("href=\"AT&T\""))
+        assertTrue(!result.contains(">AT&T<"))
     }
 }

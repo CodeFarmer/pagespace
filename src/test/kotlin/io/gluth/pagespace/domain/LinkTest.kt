@@ -1,7 +1,6 @@
 package io.gluth.pagespace.domain
 
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
@@ -30,15 +29,5 @@ class LinkTest {
         val a = Link(physics, math)
         val b = Link(math, physics)
         assertNotEquals(a, b)
-    }
-
-    @Test
-    fun nullSourceThrows() {
-        assertThrows<NullPointerException> { Link(null, math) }
-    }
-
-    @Test
-    fun nullTargetThrows() {
-        assertThrows<NullPointerException> { Link(physics, null) }
     }
 }

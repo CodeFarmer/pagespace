@@ -9,7 +9,6 @@ import io.gluth.pagespace.layout.ForceDirectedLayout
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
-import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.*
 
@@ -28,7 +27,9 @@ class MainWindow(
 
     private val _contentPane = ContentPane()
     private val _spatialPane = SpatialPane(layout)
-    private val history: ArrayDeque<Page> = ArrayDeque()
+    private val history: MutableList<Page> = mutableListOf()
+    private var historyIndex = -1
+    private var navigatingBack = false
     private val navGeneration = AtomicInteger(0)
     private var linkDensity = 20
     private val densityLabel = JLabel("20")
@@ -130,7 +131,13 @@ class MainWindow(
                 layout.setPinnedPage(page)
                 layout.computeEquilibrium()
 
-                history.push(page)
+                if (!navigatingBack) {
+                    // Truncate forward history and append
+                    while (history.size > historyIndex + 1) history.removeAt(history.size - 1)
+                    history.add(page)
+                    historyIndex = history.size - 1
+                }
+                navigatingBack = false
                 _contentPane.setContent(page, buildSeeAlso(result.body, truncated))
                 _spatialPane.setCurrentPage(page)
 
@@ -219,13 +226,10 @@ class MainWindow(
     }
 
     private fun navigateBack() {
-        if (history.size > 1) {
-            history.pop()
-            val previous = history.peek()
-            if (previous != null) {
-                history.pop()
-                navigateTo(previous)
-            }
+        if (historyIndex > 0) {
+            historyIndex--
+            navigatingBack = true
+            navigateTo(history[historyIndex])
         }
     }
 
@@ -280,16 +284,25 @@ class MainWindow(
             append(body)
             append("<hr><p><b>See also:</b> ")
             links.forEachIndexed { i, p ->
-                append("<a href=\"${p.id}\">${p.title}</a>")
+                append("<a href=\"${escapeHtml(p.id)}\">${escapeHtml(p.title)}</a>")
                 if (i < links.size - 1) append(", ")
             }
             append("</p>")
         }
     }
 
+    private fun escapeHtml(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
+
     fun contentPane(): ContentPane  = _contentPane
     fun spatialPane(): SpatialPane  = _spatialPane
     fun splitPane():   JSplitPane   = getContentPane() as JSplitPane
+    internal fun historyPages(): List<Page> = history.toList()
+    internal fun historyIndex(): Int = historyIndex
 
     private data class NavResult(
         val page:        Page,

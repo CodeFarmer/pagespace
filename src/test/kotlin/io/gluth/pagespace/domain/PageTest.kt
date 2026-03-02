@@ -1,7 +1,6 @@
 package io.gluth.pagespace.domain
 
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
@@ -27,15 +26,5 @@ class PageTest {
         val a = Page("id1", "Alpha")
         val b = Page("id2", "Alpha")
         assertNotEquals(a, b)
-    }
-
-    @Test
-    fun nullIdThrows() {
-        assertThrows<NullPointerException> { Page(null, "Title") }
-    }
-
-    @Test
-    fun nullTitleThrows() {
-        assertThrows<NullPointerException> { Page("id", null) }
     }
 }

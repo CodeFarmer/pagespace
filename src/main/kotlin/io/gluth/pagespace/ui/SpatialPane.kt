@@ -38,6 +38,10 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
     private var dragStartY = 0
     private var dragging   = false
 
+    // Cached projected coordinates from last paintComponent, keyed by page
+    private var cachedProjections: Map<Page, IntArray> = emptyMap()
+    private var cachedScales:      Map<Page, Double>   = emptyMap()
+
     init {
         background = Color(18, 20, 35)
 
@@ -75,6 +79,7 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
                 dragging = true
                 resettingView = false
                 viewYaw   += dx * DRAG_SENSITIVITY
+                viewYaw    = normalizeAngle(viewYaw)
                 viewPitch += dy * DRAG_SENSITIVITY
                 viewPitch  = viewPitch.coerceIn(-Math.PI / 2, Math.PI / 2)
                 dragStartX = e.x
@@ -96,6 +101,13 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         repaint()
     }
 
+    private fun normalizeAngle(a: Double): Double {
+        var r = a % (2 * Math.PI)
+        if (r > Math.PI) r -= 2 * Math.PI
+        if (r < -Math.PI) r += 2 * Math.PI
+        return r
+    }
+
     // ------------------------------------------------------------------ paint
 
     override fun paintComponent(g: Graphics) {
@@ -111,6 +123,16 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         val rotated = LinkedHashMap<Page, DoubleArray>()
         for ((page, np) in positions) rotated[page] = viewTransform(np)
 
+        // Cache projected coordinates and scales for hit-testing
+        val projCache = LinkedHashMap<Page, IntArray>()
+        val scaleCache = LinkedHashMap<Page, Double>()
+        for ((page, r3) in rotated) {
+            projCache[page] = project(r3[0], r3[1], r3[2])
+            scaleCache[page] = perspScale(r3[2])
+        }
+        cachedProjections = projCache
+        cachedScales = scaleCache
+
         // Sort back-to-front by rotated z (largest first)
         val entries = rotated.entries.sortedByDescending { it.value[2] }
 
@@ -118,12 +140,12 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         g2.stroke = BasicStroke(1.0f)
         for (entry in entries) {
             val src = entry.key; val sr = entry.value
-            for (tgt in layout.graph.linksFrom(src)) {
+            for (tgt in layout.edgesFrom(src)) {
                 val tr = rotated[tgt] ?: continue
                 val avgZ  = (sr[2] + tr[2]) / 2.0
                 val alpha = alphaFor(avgZ).toFloat()
-                val sp    = project(sr[0], sr[1], sr[2])
-                val ep    = project(tr[0], tr[1], tr[2])
+                val sp    = projCache[src] ?: continue
+                val ep    = projCache[tgt] ?: continue
                 g2.color  = withAlpha(EDGE_COLOR, alpha * 0.55f)
                 g2.drawLine(sp[0], sp[1], ep[0], ep[1])
             }
@@ -136,9 +158,9 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
             val r3    = entry.value
             val curr  = page == currentPage
 
-            val scale = perspScale(r3[2])
+            val scale = scaleCache[page] ?: perspScale(r3[2])
             val alpha = alphaFor(r3[2]).toFloat()
-            val sc    = project(r3[0], r3[1], r3[2])
+            val sc    = projCache[page] ?: project(r3[0], r3[1], r3[2])
             val cx    = sc[0]; val cy = sc[1]
             val r     = max(4, (BASE_RADIUS * scale).toInt())
 
@@ -163,24 +185,24 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
     // -------------------------------------------------------------- hit-test
 
     private fun nearestPage(mx: Int, my: Int): Page? {
-        val positions = layout.positions
-        if (positions.isEmpty()) return null
+        val projections = cachedProjections
+        val scales = cachedScales
+        if (projections.isEmpty()) return null
+
         var nearest: Page? = null
         var minDist = CLICK_RADIUS.toDouble()
-        for ((page, np) in positions) {
-            val r3   = viewTransform(np)
-            val sc   = project(r3[0], r3[1], r3[2])
+
+        for ((page, sc) in projections) {
             val dist = hypot((mx - sc[0]).toDouble(), (my - sc[1]).toDouble())
-            val r    = BASE_RADIUS * perspScale(r3[2])
+            val scale = scales[page] ?: 1.0
+            val r = BASE_RADIUS * scale
             if (dist < max(r, CLICK_RADIUS / 2.0) && dist < minDist) {
                 minDist = dist
                 nearest = page
             }
         }
         if (nearest == null) {
-            for ((page, np) in positions) {
-                val r3   = viewTransform(np)
-                val sc   = project(r3[0], r3[1], r3[2])
+            for ((page, sc) in projections) {
                 val dist = hypot((mx - sc[0]).toDouble(), (my - sc[1]).toDouble())
                 if (dist < CLICK_RADIUS && dist < minDist) {
                     minDist = dist
