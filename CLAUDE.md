@@ -80,6 +80,7 @@ mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
 - **Package as an Android app**
 - **Related nodes together**: Load second-order nodes and arrange them spatially closer if they also have links between them
 - **Simulate movement**: find the equilibrium point, then move smoothly towards it to eliminate the jitter
+- **Better node choice**: instead of the first n neighbours alphabetically, heuristically find out which ones are important and also give an option to increase or decrease the neighbour fetching density.
 
 ## Extension Points
 
