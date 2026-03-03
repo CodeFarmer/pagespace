@@ -159,7 +159,7 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
             val curr  = page == currentPage
 
             val scale = scaleCache[page] ?: perspScale(r3[2])
-            val alpha = alphaFor(r3[2]).toFloat()
+            val alpha = if (curr) 1.0f else alphaFor(r3[2]).toFloat()
             val sc    = projCache[page] ?: project(r3[0], r3[1], r3[2])
             val cx    = sc[0]; val cy = sc[1]
             val r     = max(4, (BASE_RADIUS * scale).toInt())

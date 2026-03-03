@@ -297,7 +297,7 @@ class ForceDirectedLayout(
         if (pp != null) {
             pp.x = width  / 2.0
             pp.y = height / 2.0
-            pp.z = 0.0
+            pp.z = depth / 2.0
         }
     }
 

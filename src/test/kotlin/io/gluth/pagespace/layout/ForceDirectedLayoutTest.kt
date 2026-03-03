@@ -207,7 +207,7 @@ class ForceDirectedLayoutTest {
         val pos = layout.positions[physics]!!
         assertEquals(W / 2.0, pos.x, 1.0)
         assertEquals(H / 2.0, pos.y, 1.0)
-        assertEquals(0.0,     pos.z, 1.0)
+        assertEquals(layout.depth / 2.0, pos.z, 1.0)
     }
 
     // --- new tests ---
@@ -419,6 +419,30 @@ class ForceDirectedLayoutTest {
         assertNotNull(layout.positions[physics])
         assertNotNull(layout.positions[math])
         assertTrue(quantum !in layout.positions)
+    }
+
+    @Test
+    fun neighborsDistributeAroundPinnedNodeIncludingForeground() {
+        val graph = PageGraph()
+        graph.addLink(Link(physics, math))
+        graph.addLink(Link(physics, quantum))
+        graph.addLink(Link(physics, logic))
+        val thermo = Page("thermo", "Thermodynamics")
+        val optics = Page("optics", "Optics")
+        graph.addLink(Link(physics, thermo))
+        graph.addLink(Link(physics, optics))
+
+        val layout = ForceDirectedLayout(graph, W, H, SEED)
+        layout.setPinnedPage(physics)
+        converge(layout)
+
+        val pinnedZ = layout.positions[physics]!!.z
+        val neighbors = listOf(math, quantum, logic, thermo, optics)
+        val inFront = neighbors.any { layout.positions[it]!!.z < pinnedZ }
+        val behind  = neighbors.any { layout.positions[it]!!.z > pinnedZ }
+
+        assertTrue(inFront, "At least one neighbor should be in front of the pinned node (z < $pinnedZ)")
+        assertTrue(behind,  "At least one neighbor should be behind the pinned node (z > $pinnedZ)")
     }
 
     // --- helpers ---
