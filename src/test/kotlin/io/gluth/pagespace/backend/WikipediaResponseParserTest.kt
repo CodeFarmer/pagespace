@@ -150,6 +150,27 @@ class WikipediaResponseParserTest {
     }
 
     @Test
+    fun parseOpenSearchTitlesExtractsTitles() {
+        val json = """["phys",["Physics","Physical chemistry","Physical science"],[],[]]"""
+        val titles = WikipediaResponseParser.parseOpenSearchTitles(json)
+        assertEquals(listOf("Physics", "Physical chemistry", "Physical science"), titles)
+    }
+
+    @Test
+    fun parseOpenSearchTitlesReturnsEmptyForNoResults() {
+        val json = """["zzzzz",[],[],[]]"""
+        val titles = WikipediaResponseParser.parseOpenSearchTitles(json)
+        assertTrue(titles.isEmpty())
+    }
+
+    @Test
+    fun parseOpenSearchTitlesReturnsEmptyForMalformedJson() {
+        val json = """["only query"]"""
+        val titles = WikipediaResponseParser.parseOpenSearchTitles(json)
+        assertTrue(titles.isEmpty())
+    }
+
+    @Test
     fun parseLeadSectionLinksDecodesUrlEncodedTitles() {
         val json = """
             {

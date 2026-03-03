@@ -78,7 +78,6 @@ mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
 
 ## TODO
 
-- **Node search / jump bar** (`MainWindow` / `SpatialPane`): add a `JTextField` above the spatial pane that filters visible node labels as the user types and navigates to the matching page on Enter.
 - **Package as an Android app**
 
 ## Extension Points

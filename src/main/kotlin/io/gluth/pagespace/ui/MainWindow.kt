@@ -7,10 +7,17 @@ import io.gluth.pagespace.domain.Page
 import io.gluth.pagespace.domain.PageGraph
 import io.gluth.pagespace.layout.ForceDirectedLayout
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.*
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 
 class MainWindow(
     private val backend: ContentBackend,
@@ -36,6 +43,11 @@ class MainWindow(
     private var currentPage: Page? = null
     private var currentFullLinks: List<Page> = emptyList()
     private var currentBody: String = ""
+    private val _searchField = JTextField()
+    private val searchPopup = JPopupMenu().apply { isFocusable = false }
+    private val searchGeneration = AtomicInteger(0)
+    private var lastBackendResults: List<Page> = emptyList()
+    private var lastBackendGeneration = 0
 
     init {
         _contentPane.setNavigationListener(this)
@@ -67,13 +79,14 @@ class MainWindow(
             add(plusButton)
         }
 
+        setupSearchField()
+
         val spatialWrapper = JPanel(BorderLayout()).apply {
+            add(_searchField, BorderLayout.NORTH)
             add(_spatialPane, BorderLayout.CENTER)
             add(densityPanel, BorderLayout.SOUTH)
         }
 
-        // TODO: add a search/jump bar above the spatial pane — a JTextField that filters
-        //       visible node labels as you type and navigates to the selected page on Enter
         val splitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, _contentPane, spatialWrapper)
         splitPane.resizeWeight = 1.0 / 3.0
         splitPane.dividerLocation = 400
@@ -263,6 +276,169 @@ class MainWindow(
         _spatialPane.setCurrentPage(page)
     }
 
+    private fun setupSearchField() {
+        val placeholder = "Search..."
+        val defaultFg = _searchField.foreground
+
+        _searchField.foreground = Color.GRAY
+        _searchField.text = placeholder
+
+        val debounceTimer = Timer(300) { /* replaced per-restart */ }
+        debounceTimer.isRepeats = false
+
+        _searchField.addFocusListener(object : FocusAdapter() {
+            override fun focusGained(e: FocusEvent) {
+                if (_searchField.text == placeholder && _searchField.foreground == Color.GRAY) {
+                    _searchField.text = ""
+                    _searchField.foreground = defaultFg
+                }
+            }
+            override fun focusLost(e: FocusEvent) {
+                if (_searchField.text.isEmpty()) {
+                    _searchField.foreground = Color.GRAY
+                    _searchField.text = placeholder
+                }
+            }
+        })
+
+        _searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = onTextChanged()
+            override fun removeUpdate(e: DocumentEvent) = onTextChanged()
+            override fun changedUpdate(e: DocumentEvent) = onTextChanged()
+
+            private fun onTextChanged() {
+                val query = _searchField.text
+                if (query.isEmpty() || query == placeholder) {
+                    searchPopup.isVisible = false
+                    debounceTimer.stop()
+                    return
+                }
+
+                // Instant local matches
+                val localMatches = graph.pages()
+                    .filter { it.title.contains(query, ignoreCase = true) }
+                    .take(10)
+                rebuildPopup(localMatches, emptyList(), placeholder)
+
+                // Debounced backend search
+                val gen = searchGeneration.incrementAndGet()
+                debounceTimer.stop()
+                for (al in debounceTimer.actionListeners) debounceTimer.removeActionListener(al)
+                debounceTimer.addActionListener {
+                    launchBackendSearch(query, gen, placeholder)
+                }
+                debounceTimer.restart()
+            }
+        })
+
+        _searchField.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                when (e.keyCode) {
+                    KeyEvent.VK_ENTER -> {
+                        val query = _searchField.text
+                        if (query.isNotEmpty() && query != placeholder) {
+                            // Try local match first
+                            val localMatch = graph.pages()
+                                .firstOrNull { it.title.contains(query, ignoreCase = true) }
+                            if (localMatch != null) {
+                                clearSearch(placeholder)
+                                navigateTo(localMatch)
+                            } else if (lastBackendGeneration == searchGeneration.get() && lastBackendResults.isNotEmpty()) {
+                                // Use already-returned backend results
+                                val page = lastBackendResults.first()
+                                clearSearch(placeholder)
+                                navigateTo(page)
+                            } else {
+                                // Backend hasn't returned yet — synchronous fetch via SwingWorker
+                                val searchQuery = query
+                                clearSearch(placeholder)
+                                val worker = object : SwingWorker<List<Page>, Void>() {
+                                    override fun doInBackground(): List<Page> = backend.searchPages(searchQuery)
+                                    override fun done() {
+                                        val results = try { get() } catch (_: Exception) { emptyList() }
+                                        if (results.isNotEmpty()) navigateTo(results.first())
+                                    }
+                                }
+                                worker.execute()
+                            }
+                        }
+                        e.consume()
+                    }
+                    KeyEvent.VK_ESCAPE -> {
+                        clearSearch(placeholder)
+                        e.consume()
+                    }
+                }
+            }
+        })
+    }
+
+    private fun launchBackendSearch(query: String, generation: Int, placeholder: String) {
+        val worker = object : SwingWorker<List<Page>, Void>() {
+            override fun doInBackground(): List<Page> = backend.searchPages(query)
+            override fun done() {
+                if (searchGeneration.get() != generation) return
+                val results = try { get() } catch (_: Exception) { emptyList() }
+                lastBackendResults = results
+                lastBackendGeneration = generation
+
+                val currentQuery = _searchField.text
+                if (currentQuery.isEmpty() || currentQuery == placeholder) return
+
+                val localMatches = graph.pages()
+                    .filter { it.title.contains(currentQuery, ignoreCase = true) }
+                    .take(10)
+                rebuildPopup(localMatches, results, placeholder)
+            }
+        }
+        worker.execute()
+    }
+
+    private fun rebuildPopup(localMatches: List<Page>, backendResults: List<Page>, placeholder: String) {
+        searchPopup.removeAll()
+        val localIds = localMatches.map { it.id }.toSet()
+
+        for (page in localMatches) {
+            val item = JMenuItem(page.title)
+            item.addActionListener {
+                clearSearch(placeholder)
+                navigateTo(page)
+            }
+            searchPopup.add(item)
+        }
+
+        val remoteOnly = backendResults.filter { it.id !in localIds }
+        if (remoteOnly.isNotEmpty()) {
+            val remaining = 10 - localMatches.size
+            if (remaining > 0) {
+                val separator = JMenuItem("--- Wikipedia ---")
+                separator.isEnabled = false
+                searchPopup.add(separator)
+                for (page in remoteOnly.take(remaining)) {
+                    val item = JMenuItem(page.title)
+                    item.addActionListener {
+                        clearSearch(placeholder)
+                        navigateTo(page)
+                    }
+                    searchPopup.add(item)
+                }
+            }
+        }
+
+        if (searchPopup.componentCount == 0) {
+            searchPopup.isVisible = false
+            return
+        }
+        searchPopup.show(_searchField, 0, _searchField.height)
+    }
+
+    private fun clearSearch(placeholder: String) {
+        searchPopup.isVisible = false
+        _searchField.foreground = Color.GRAY
+        _searchField.text = placeholder
+        _spatialPane.requestFocusInWindow()
+    }
+
     private fun removeOrphans(keep: Page) {
         var changed = true
         while (changed) {
@@ -299,6 +475,7 @@ class MainWindow(
 
     fun contentPane(): ContentPane  = _contentPane
     fun spatialPane(): SpatialPane  = _spatialPane
+    fun searchField(): JTextField   = _searchField
     fun splitPane():   JSplitPane   = getContentPane() as JSplitPane
     internal fun historyPages(): List<Page> = history.toList()
     internal fun historyIndex(): Int = historyIndex

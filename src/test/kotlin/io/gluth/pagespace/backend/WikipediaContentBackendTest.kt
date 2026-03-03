@@ -139,6 +139,28 @@ class WikipediaContentBackendTest {
     }
 
     @Test
+    fun searchPagesCallsOpenSearchAndReturnsPages() {
+        val opensearchJson = """["phys",["Physics","Physical chemistry"],[],[]]"""
+        val backend = stubBackend(mapOf(
+            "action=opensearch" to opensearchJson
+        ))
+        val results = backend.searchPages("phys")
+        assertEquals(2, results.size)
+        assertEquals(Page("Physics", "Physics"), results[0])
+        assertEquals(Page("Physical chemistry", "Physical chemistry"), results[1])
+    }
+
+    @Test
+    fun searchPagesReturnsEmptyForNoResults() {
+        val opensearchJson = """["zzzzz",[],[],[]]"""
+        val backend = stubBackend(mapOf(
+            "action=opensearch" to opensearchJson
+        ))
+        val results = backend.searchPages("zzzzz")
+        assertTrue(results.isEmpty())
+    }
+
+    @Test
     fun defaultPageIsPhysics() {
         val backend = WikipediaContentBackend { throw AssertionError("should not be called") }
         assertEquals(Page("Physics", "Physics"), backend.defaultPage())

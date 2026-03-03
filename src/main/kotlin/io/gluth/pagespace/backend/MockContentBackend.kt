@@ -146,4 +146,7 @@ class MockContentBackend : ContentBackend {
     override fun fetchBody(id: String): String = BODIES[id] ?: throw PageNotFoundException(id)
 
     override fun fetchLinks(id: String): List<Page> = LINKS[id] ?: throw PageNotFoundException(id)
+
+    override fun searchPages(query: String): List<Page> =
+        PAGES.values.filter { it.title.contains(query, ignoreCase = true) }
 }

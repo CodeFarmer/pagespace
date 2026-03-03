@@ -30,6 +30,13 @@ internal object WikipediaResponseParser {
         return seen.toList()
     }
 
+    fun parseOpenSearchTitles(json: String): List<String> {
+        val arr = JSONArray(json)
+        if (arr.length() < 2) return emptyList()
+        val titles = arr.getJSONArray(1)
+        return (0 until titles.length()).map { titles.getString(it) }
+    }
+
     fun parseLinks(json: String): List<String> {
         val titles = mutableListOf<String>()
         val pages = JSONObject(json).getJSONObject("query").getJSONObject("pages")

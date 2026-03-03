@@ -3,6 +3,7 @@ package io.gluth.pagespace.backend
 import io.gluth.pagespace.domain.Page
 import java.io.IOException
 import java.net.URI
+import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
@@ -21,6 +22,9 @@ class WikipediaContentBackend internal constructor(
         internal const val LEAD_SECTION_BASE =
             "https://en.wikipedia.org/w/api.php" +
             "?action=parse&prop=text&section=0&format=json&page="
+        internal const val SEARCH_BASE =
+            "https://en.wikipedia.org/w/api.php" +
+            "?action=opensearch&limit=10&namespace=0&format=json&search="
         private const val USER_AGENT =
             "page-space/0.1 (https://github.com/CodeFarmer/page-space; educational)"
         private val DEFAULT_PAGE = Page("Physics", "Physics")
@@ -44,6 +48,13 @@ class WikipediaContentBackend internal constructor(
 
         bodyCache[id] = cleaned
         return cleaned
+    }
+
+    override fun searchPages(query: String): List<Page> {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val json = get(SEARCH_BASE + encoded)
+        val titles = WikipediaResponseParser.parseOpenSearchTitles(json)
+        return titles.map { Page(it, it) }
     }
 
     override fun fetchLinks(id: String): List<Page> {

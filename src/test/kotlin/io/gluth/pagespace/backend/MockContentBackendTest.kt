@@ -6,6 +6,7 @@ import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class MockContentBackendTest {
 
@@ -54,6 +55,24 @@ class MockContentBackendTest {
     @Test
     fun fetchLinksThrowsForUnknownPage() {
         assertThrows<PageNotFoundException> { backend.fetchLinks("mock:unknown-xyz") }
+    }
+
+    @Test
+    fun searchPagesFindsMatchingPages() {
+        val results = backend.searchPages("phys")
+        assertTrue(results.any { it.title == "Physics" })
+    }
+
+    @Test
+    fun searchPagesIsCaseInsensitive() {
+        val results = backend.searchPages("PHYS")
+        assertTrue(results.any { it.title == "Physics" })
+    }
+
+    @Test
+    fun searchPagesReturnsEmptyForNoMatch() {
+        val results = backend.searchPages("zzz")
+        assertTrue(results.isEmpty())
     }
 
     @Test

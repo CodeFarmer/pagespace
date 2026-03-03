@@ -10,7 +10,9 @@ import java.awt.GraphicsEnvironment
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import javax.swing.JPanel
 import javax.swing.JSplitPane
+import javax.swing.JTextField
 import javax.swing.SwingUtilities
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -135,6 +137,20 @@ class MainWindowTest {
         assertFalse(pages.contains(physics), "Physics should be pruned after navigating to Philosophy")
         assertTrue(pages.contains(philosophy))
         assertTrue(pages.contains(Page("mock:logic", "Logic")))
+    }
+
+    @Test
+    fun searchFieldExistsInHierarchy() {
+        val window = createWindow()
+        val field = window.searchField()
+        assertNotNull(field)
+        assertIs<JTextField>(field)
+
+        // Verify it's in the component hierarchy: spatialWrapper is the right side of the split
+        val splitPane = window.splitPane()
+        val spatialWrapper = splitPane.rightComponent as JPanel
+        val searchField = spatialWrapper.getComponent(0) // NORTH is first in BorderLayout
+        assertEquals(field, searchField)
     }
 
     @Test
