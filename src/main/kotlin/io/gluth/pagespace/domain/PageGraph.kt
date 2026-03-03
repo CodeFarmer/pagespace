@@ -45,6 +45,34 @@ class PageGraph {
         return cache[Pair(a, b)] ?: cache[Pair(b, a)] ?: 0
     }
 
+    fun pagesWithinDistance(start: Page, maxDistance: Int): Set<Page> {
+        val visited = LinkedHashSet<Page>()
+        val queue = ArrayDeque<Pair<Page, Int>>()
+        if (start !in outEdges) return visited
+        visited.add(start)
+        queue.add(start to 0)
+        while (queue.isNotEmpty()) {
+            val (current, dist) = queue.removeFirst()
+            if (dist >= maxDistance) continue
+            val neighbors = LinkedHashSet<Page>()
+            outEdges[current]?.let { neighbors.addAll(it) }
+            inEdges[current]?.let { neighbors.addAll(it) }
+            for (n in neighbors) {
+                if (n !in visited) {
+                    visited.add(n)
+                    queue.add(n to dist + 1)
+                }
+            }
+        }
+        return visited
+    }
+
+    fun pruneDistant(keep: Page, maxDistance: Int) {
+        val reachable = pagesWithinDistance(keep, maxDistance)
+        val toRemove = pages().filter { it !in reachable }
+        for (p in toRemove) removePage(p)
+    }
+
     private fun buildSharedLinkCache(): MutableMap<Pair<Page, Page>, Int> {
         val cache = HashMap<Pair<Page, Page>, Int>()
         val pageList = outEdges.keys.toList()

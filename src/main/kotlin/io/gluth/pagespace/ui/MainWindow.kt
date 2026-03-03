@@ -117,8 +117,6 @@ class MainWindow(
                     return
                 }
 
-                // TODO: prune nodes that are too far from the current page (e.g. no path
-                //       of length ≤ N to the current page) so the graph doesn't grow unboundedly
                 currentPage = page
                 currentFullLinks = result.linkedPages
                 currentBody = result.body
@@ -127,6 +125,7 @@ class MainWindow(
                 for (linked in truncated) {
                     graph.addLink(Link(page, linked))
                 }
+                graph.pruneDistant(page, 2)
                 layout.syncWithGraph()
                 layout.setPinnedPage(page)
                 layout.computeEquilibrium()
@@ -303,6 +302,7 @@ class MainWindow(
     fun splitPane():   JSplitPane   = getContentPane() as JSplitPane
     internal fun historyPages(): List<Page> = history.toList()
     internal fun historyIndex(): Int = historyIndex
+    internal fun graph(): PageGraph = graph
 
     private data class NavResult(
         val page:        Page,

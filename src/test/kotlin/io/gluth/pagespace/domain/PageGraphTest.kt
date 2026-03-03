@@ -125,4 +125,67 @@ class PageGraphTest {
         assertFalse(sources.contains(physics))
         assertTrue(sources.contains(quantum))
     }
+
+    @Test
+    fun pagesWithinDistanceReturnsCorrectSet() {
+        val a = Page("a", "A")
+        val b = Page("b", "B")
+        val c = Page("c", "C")
+        val d = Page("d", "D")
+        val e = Page("e", "E")
+        graph.addLink(Link(a, b))
+        graph.addLink(Link(b, c))
+        graph.addLink(Link(c, d))
+        graph.addLink(Link(d, e))
+
+        val reachable = graph.pagesWithinDistance(c, 1)
+        assertEquals(setOf(b, c, d), reachable)
+
+        val reachable2 = graph.pagesWithinDistance(c, 2)
+        assertEquals(setOf(a, b, c, d, e), reachable2)
+    }
+
+    @Test
+    fun pagesWithinDistanceTreatsEdgesAsUndirected() {
+        val a = Page("a", "A")
+        val b = Page("b", "B")
+        graph.addLink(Link(a, b))
+
+        val fromA = graph.pagesWithinDistance(a, 1)
+        assertTrue(b in fromA)
+
+        val fromB = graph.pagesWithinDistance(b, 1)
+        assertTrue(a in fromB)
+    }
+
+    @Test
+    fun pruneDistantRemovesFarNodes() {
+        val a = Page("a", "A")
+        val b = Page("b", "B")
+        val c = Page("c", "C")
+        val d = Page("d", "D")
+        val e = Page("e", "E")
+        graph.addLink(Link(a, b))
+        graph.addLink(Link(b, c))
+        graph.addLink(Link(c, d))
+        graph.addLink(Link(d, e))
+
+        graph.pruneDistant(c, 1)
+
+        val remaining = graph.pages()
+        assertEquals(setOf(b, c, d), remaining)
+        assertFalse(a in remaining)
+        assertFalse(e in remaining)
+    }
+
+    @Test
+    fun pruneDistantKeepsAllWhenWithinDistance() {
+        graph.addLink(Link(physics, math))
+        graph.addLink(Link(math, quantum))
+        graph.addLink(Link(quantum, physics))
+
+        graph.pruneDistant(physics, 2)
+
+        assertEquals(setOf(physics, math, quantum), graph.pages())
+    }
 }

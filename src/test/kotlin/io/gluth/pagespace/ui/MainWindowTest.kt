@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JSplitPane
 import javax.swing.SwingUtilities
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -114,6 +115,26 @@ class MainWindowTest {
         // History should still have 3 entries, but index should be 1 (pointing to math)
         assertEquals(3, window.historyPages().size)
         assertEquals(1, window.historyIndex())
+    }
+
+    @Test
+    fun pruningRemovesDistantNodesAfterNavigation() {
+        val window = createWindow()
+        val graph = window.graph()
+        val physics = Page("mock:physics", "Physics")
+        val philosophy = Page("mock:philosophy", "Philosophy")
+
+        navigateAndWait(window, physics)
+        // After navigating to physics, graph contains physics and its neighbors
+        assertTrue(graph.pages().contains(physics))
+
+        navigateAndWait(window, philosophy)
+        // Philosophy links to logic only; physics is more than 2 hops away
+        // so pruning should remove it
+        val pages = graph.pages()
+        assertFalse(pages.contains(physics), "Physics should be pruned after navigating to Philosophy")
+        assertTrue(pages.contains(philosophy))
+        assertTrue(pages.contains(Page("mock:logic", "Logic")))
     }
 
     @Test
