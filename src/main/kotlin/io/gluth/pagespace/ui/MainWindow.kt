@@ -1,11 +1,8 @@
 package io.gluth.pagespace.ui
 
-import io.gluth.pagespace.backend.ContentBackend
-import io.gluth.pagespace.backend.PageNotFoundException
-import io.gluth.pagespace.domain.Link
 import io.gluth.pagespace.domain.Page
 import io.gluth.pagespace.domain.PageGraph
-import io.gluth.pagespace.layout.ForceDirectedLayout
+import io.gluth.pagespace.presenter.NavigationPresenter
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Dimension
@@ -14,40 +11,25 @@ import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
-import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.*
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
 class MainWindow(
-    private val backend: ContentBackend,
-    private val graph:   PageGraph,
-    private val layout:  ForceDirectedLayout
+    private val presenter: NavigationPresenter
 ) : JFrame("page-space"), NavigationListener {
 
     companion object {
-        private const val MAX_SECOND_ORDER_NODES = 30
         private const val MIN_LINK_DENSITY = 5
         private const val MAX_LINK_DENSITY = 50
         private const val DENSITY_STEP = 5
     }
 
     private val _contentPane = ContentPane()
-    private val _spatialPane = SpatialPane(layout)
-    private val history: MutableList<Page> = mutableListOf()
-    private var historyIndex = -1
-    private var navigatingBack = false
-    private val navGeneration = AtomicInteger(0)
-    private var linkDensity = 20
-    private val densityLabel = JLabel("20")
-    private var currentPage: Page? = null
-    private var currentFullLinks: List<Page> = emptyList()
-    private var currentBody: String = ""
+    private val _spatialPane = SpatialPane(presenter.layout)
+    private val densityLabel = JLabel(presenter.linkDensity.toString())
     private val _searchField = JTextField()
     private val searchPopup = JPopupMenu().apply { isFocusable = false }
-    private val searchGeneration = AtomicInteger(0)
-    private var lastBackendResults: List<Page> = emptyList()
-    private var lastBackendGeneration = 0
 
     init {
         _contentPane.setNavigationListener(this)
@@ -56,19 +38,19 @@ class MainWindow(
 
         val minusButton = JButton("-").apply {
             addActionListener {
-                if (linkDensity > MIN_LINK_DENSITY) {
-                    linkDensity -= DENSITY_STEP
-                    densityLabel.text = linkDensity.toString()
-                    applyDensity()
+                if (presenter.linkDensity > MIN_LINK_DENSITY) {
+                    val newDensity = presenter.linkDensity - DENSITY_STEP
+                    densityLabel.text = newDensity.toString()
+                    applyDensity(newDensity)
                 }
             }
         }
         val plusButton = JButton("+").apply {
             addActionListener {
-                if (linkDensity < MAX_LINK_DENSITY) {
-                    linkDensity += DENSITY_STEP
-                    densityLabel.text = linkDensity.toString()
-                    applyDensity()
+                if (presenter.linkDensity < MAX_LINK_DENSITY) {
+                    val newDensity = presenter.linkDensity + DENSITY_STEP
+                    densityLabel.text = newDensity.toString()
+                    applyDensity(newDensity)
                 }
             }
         }
@@ -97,31 +79,24 @@ class MainWindow(
     }
 
     override fun navigateTo(page: Page) {
-        val myGen = navGeneration.incrementAndGet()
+        val myGen = presenter.newNavGeneration()
 
         _contentPane.setLoading(page.title)
 
-        val worker = object : SwingWorker<NavResult, Void>() {
-            override fun doInBackground(): NavResult {
-                return try {
-                    val linkedPages = backend.fetchLinks(page.id)
-                    val body = backend.fetchBody(page.id)
-                    NavResult(page, linkedPages, body, null)
-                } catch (e: PageNotFoundException) {
-                    NavResult(page, emptyList(), "", e.message)
-                }
+        val worker = object : SwingWorker<NavigationPresenter.NavResult, Void>() {
+            override fun doInBackground(): NavigationPresenter.NavResult {
+                return presenter.fetchNavData(page)
             }
 
             override fun done() {
-                if (navGeneration.get() != myGen) return
-
                 val result = try {
                     get()
                 } catch (e: Exception) {
-                    NavResult(page, emptyList(), "", e.message)
+                    NavigationPresenter.NavResult(page, emptyList(), "", e.message)
                 }
 
                 if (result.error != null) {
+                    if (presenter.currentNavGeneration() != myGen) return
                     JOptionPane.showMessageDialog(
                         this@MainWindow,
                         "Page not found: ${page.id}",
@@ -130,30 +105,12 @@ class MainWindow(
                     return
                 }
 
-                currentPage = page
-                currentFullLinks = result.linkedPages
-                currentBody = result.body
+                val applied = presenter.applyNavigation(result, myGen) ?: return
 
-                val truncated = result.linkedPages.take(linkDensity)
-                for (linked in truncated) {
-                    graph.addLink(Link(page, linked))
-                }
-                graph.pruneDistant(page, 2)
-                layout.syncWithGraph()
-                layout.setPinnedPage(page)
-                layout.computeEquilibrium()
+                _contentPane.setContent(applied.page, applied.bodyWithSeeAlso)
+                _spatialPane.setCurrentPage(applied.page)
 
-                if (!navigatingBack) {
-                    // Truncate forward history and append
-                    while (history.size > historyIndex + 1) history.removeAt(history.size - 1)
-                    history.add(page)
-                    historyIndex = history.size - 1
-                }
-                navigatingBack = false
-                _contentPane.setContent(page, buildSeeAlso(result.body, truncated))
-                _spatialPane.setCurrentPage(page)
-
-                launchSecondOrderEnrichment(page, truncated, myGen, linkDensity)
+                launchSecondOrderEnrichment(applied.page, applied.truncatedLinks, myGen)
             }
         }
 
@@ -163,74 +120,21 @@ class MainWindow(
     private fun launchSecondOrderEnrichment(
         centerPage: Page,
         firstOrderNeighbors: List<Page>,
-        generation: Int,
-        density: Int
+        generation: Int
     ) {
-        val worker = object : SwingWorker<SecondOrderResult, Void>() {
-            override fun doInBackground(): SecondOrderResult {
-                val neighborLinks = mutableMapOf<Page, List<Page>>()
-                for (neighbor in firstOrderNeighbors) {
-                    if (navGeneration.get() != generation) return SecondOrderResult(emptyMap())
-                    try {
-                        neighborLinks[neighbor] = backend.fetchLinks(neighbor.id).take(density)
-                    } catch (_: PageNotFoundException) {
-                        // skip unreachable neighbors
-                    }
-                }
-                return SecondOrderResult(neighborLinks)
+        val density = presenter.linkDensity
+        val worker = object : SwingWorker<NavigationPresenter.SecondOrderResult, Void>() {
+            override fun doInBackground(): NavigationPresenter.SecondOrderResult {
+                return presenter.fetchSecondOrderData(firstOrderNeighbors, density, generation)
             }
 
             override fun done() {
-                if (navGeneration.get() != generation) return
-
                 val result = try {
                     get()
                 } catch (_: Exception) {
                     return
                 }
-
-                if (result.neighborLinks.isEmpty()) return
-
-                val existingPages = graph.pages()
-
-                // Phase 1: add cross-links between nodes already in the graph
-                for ((neighbor, targets) in result.neighborLinks) {
-                    for (target in targets) {
-                        if (target in existingPages && target != centerPage) {
-                            graph.addLink(Link(neighbor, target))
-                        }
-                    }
-                }
-
-                // Phase 2: find second-order nodes referenced by 2+ first-order neighbors
-                val candidateCounts = mutableMapOf<Page, Int>()
-                for ((_, targets) in result.neighborLinks) {
-                    for (target in targets) {
-                        if (target !in existingPages) {
-                            candidateCounts[target] = (candidateCounts[target] ?: 0) + 1
-                        }
-                    }
-                }
-
-                val maxBridge = minOf(density, MAX_SECOND_ORDER_NODES)
-                val bridgeNodes = candidateCounts.entries
-                    .filter { it.value >= 2 }
-                    .sortedByDescending { it.value }
-                    .take(maxBridge)
-                    .map { it.key }
-                    .toSet()
-
-                // Add links from first-order neighbors to accepted bridge nodes
-                for ((neighbor, targets) in result.neighborLinks) {
-                    for (target in targets) {
-                        if (target in bridgeNodes) {
-                            graph.addLink(Link(neighbor, target))
-                        }
-                    }
-                }
-
-                layout.syncWithGraph()
-                layout.computeEquilibrium()
+                presenter.applySecondOrder(result, centerPage, generation)
             }
         }
 
@@ -238,42 +142,14 @@ class MainWindow(
     }
 
     private fun navigateBack() {
-        if (historyIndex > 0) {
-            historyIndex--
-            navigatingBack = true
-            navigateTo(history[historyIndex])
-        }
+        val page = presenter.navigateBack() ?: return
+        navigateTo(page)
     }
 
-    private fun applyDensity() {
-        val page = currentPage ?: return
-        if (currentFullLinks.isEmpty()) return
-
-        val desired = currentFullLinks.take(linkDensity)
-        val desiredSet = desired.toSet()
-        val fullSet = currentFullLinks.toSet()
-
-        // Remove first-order links beyond the new cutoff
-        for (target in graph.linksFrom(page).toList()) {
-            if (target in fullSet && target !in desiredSet) {
-                graph.removeLink(Link(page, target))
-            }
-        }
-
-        // Add first-order links within the cutoff
-        for (target in desired) {
-            graph.addLink(Link(page, target))
-        }
-
-        // Remove orphaned pages (no in-edges, not the current page)
-        removeOrphans(page)
-
-        layout.syncWithGraph()
-        layout.setPinnedPage(page)
-        layout.computeEquilibrium()
-
-        _contentPane.setContent(page, buildSeeAlso(currentBody, desired))
-        _spatialPane.setCurrentPage(page)
+    private fun applyDensity(newDensity: Int) {
+        val result = presenter.applyDensity(newDensity) ?: return
+        _contentPane.setContent(result.page, result.bodyWithSeeAlso)
+        _spatialPane.setCurrentPage(result.page)
     }
 
     private fun setupSearchField() {
@@ -315,13 +191,11 @@ class MainWindow(
                 }
 
                 // Instant local matches
-                val localMatches = graph.pages()
-                    .filter { it.title.contains(query, ignoreCase = true) }
-                    .take(10)
+                val localMatches = presenter.localSearch(query)
                 rebuildPopup(localMatches, emptyList(), placeholder)
 
                 // Debounced backend search
-                val gen = searchGeneration.incrementAndGet()
+                val gen = presenter.newSearchGeneration()
                 debounceTimer.stop()
                 for (al in debounceTimer.actionListeners) debounceTimer.removeActionListener(al)
                 debounceTimer.addActionListener {
@@ -338,28 +212,30 @@ class MainWindow(
                         val query = _searchField.text
                         if (query.isNotEmpty() && query != placeholder) {
                             // Try local match first
-                            val localMatch = graph.pages()
-                                .firstOrNull { it.title.contains(query, ignoreCase = true) }
+                            val localMatch = presenter.localSearch(query).firstOrNull()
                             if (localMatch != null) {
                                 clearSearch(placeholder)
                                 navigateTo(localMatch)
-                            } else if (lastBackendGeneration == searchGeneration.get() && lastBackendResults.isNotEmpty()) {
-                                // Use already-returned backend results
-                                val page = lastBackendResults.first()
-                                clearSearch(placeholder)
-                                navigateTo(page)
                             } else {
-                                // Backend hasn't returned yet — synchronous fetch via SwingWorker
-                                val searchQuery = query
-                                clearSearch(placeholder)
-                                val worker = object : SwingWorker<List<Page>, Void>() {
-                                    override fun doInBackground(): List<Page> = backend.searchPages(searchQuery)
-                                    override fun done() {
-                                        val results = try { get() } catch (_: Exception) { emptyList() }
-                                        if (results.isNotEmpty()) navigateTo(results.first())
+                                val cached = presenter.cachedBackendResults()
+                                if (cached != null && cached.isNotEmpty()) {
+                                    val page = cached.first()
+                                    clearSearch(placeholder)
+                                    navigateTo(page)
+                                } else {
+                                    // Backend hasn't returned yet — fetch via SwingWorker
+                                    val searchQuery = query
+                                    clearSearch(placeholder)
+                                    val searchWorker = object : SwingWorker<List<Page>, Void>() {
+                                        override fun doInBackground(): List<Page> =
+                                            presenter.backendSearch(searchQuery)
+                                        override fun done() {
+                                            val results = try { get() } catch (_: Exception) { emptyList() }
+                                            if (results.isNotEmpty()) navigateTo(results.first())
+                                        }
                                     }
+                                    searchWorker.execute()
                                 }
-                                worker.execute()
                             }
                         }
                         e.consume()
@@ -375,19 +251,15 @@ class MainWindow(
 
     private fun launchBackendSearch(query: String, generation: Int, placeholder: String) {
         val worker = object : SwingWorker<List<Page>, Void>() {
-            override fun doInBackground(): List<Page> = backend.searchPages(query)
+            override fun doInBackground(): List<Page> = presenter.backendSearch(query)
             override fun done() {
-                if (searchGeneration.get() != generation) return
                 val results = try { get() } catch (_: Exception) { emptyList() }
-                lastBackendResults = results
-                lastBackendGeneration = generation
+                if (!presenter.applyBackendSearchResults(results, generation)) return
 
                 val currentQuery = _searchField.text
                 if (currentQuery.isEmpty() || currentQuery == placeholder) return
 
-                val localMatches = graph.pages()
-                    .filter { it.title.contains(currentQuery, ignoreCase = true) }
-                    .take(10)
+                val localMatches = presenter.localSearch(currentQuery)
                 rebuildPopup(localMatches, results, placeholder)
             }
         }
@@ -439,56 +311,11 @@ class MainWindow(
         _spatialPane.requestFocusInWindow()
     }
 
-    private fun removeOrphans(keep: Page) {
-        var changed = true
-        while (changed) {
-            changed = false
-            for (p in graph.pages()) {
-                if (p != keep && graph.linksTo(p).isEmpty()) {
-                    graph.removePage(p)
-                    changed = true
-                    break
-                }
-            }
-        }
-    }
-
-    private fun buildSeeAlso(body: String, links: List<Page>): String {
-        if (links.isEmpty()) return body
-        return buildString {
-            append(body)
-            append("<hr><p><b>See also:</b> ")
-            links.forEachIndexed { i, p ->
-                append("<a href=\"${escapeHtml(p.id)}\">${escapeHtml(p.title)}</a>")
-                if (i < links.size - 1) append(", ")
-            }
-            append("</p>")
-        }
-    }
-
-    private fun escapeHtml(s: String): String = s
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\"", "&quot;")
-        .replace("'", "&#39;")
-
     fun contentPane(): ContentPane  = _contentPane
     fun spatialPane(): SpatialPane  = _spatialPane
     fun searchField(): JTextField   = _searchField
     fun splitPane():   JSplitPane   = getContentPane() as JSplitPane
-    internal fun historyPages(): List<Page> = history.toList()
-    internal fun historyIndex(): Int = historyIndex
-    internal fun graph(): PageGraph = graph
-
-    private data class NavResult(
-        val page:        Page,
-        val linkedPages: List<Page>,
-        val body:        String,
-        val error:       String?
-    )
-
-    private data class SecondOrderResult(
-        val neighborLinks: Map<Page, List<Page>>
-    )
+    internal fun historyPages(): List<Page> = presenter.history.pages()
+    internal fun historyIndex(): Int = presenter.history.currentIndex()
+    internal fun graph(): PageGraph = presenter.graph
 }

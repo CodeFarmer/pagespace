@@ -5,6 +5,7 @@ package io.gluth.pagespace
 import io.gluth.pagespace.backend.WikipediaContentBackend
 import io.gluth.pagespace.domain.PageGraph
 import io.gluth.pagespace.layout.ForceDirectedLayout
+import io.gluth.pagespace.presenter.NavigationPresenter
 import io.gluth.pagespace.ui.MainWindow
 import javax.swing.SwingUtilities
 
@@ -14,7 +15,8 @@ fun main() {
         val graph   = PageGraph()
         val layout  = ForceDirectedLayout(graph, 760.0, 660.0)
 
-        val window = MainWindow(backend, graph, layout)
+        val presenter = NavigationPresenter(graph, layout, backend)
+        val window = MainWindow(presenter)
         window.isVisible = true
 
         val defaultPage = backend.defaultPage()

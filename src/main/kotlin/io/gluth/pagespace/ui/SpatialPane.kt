@@ -2,7 +2,7 @@ package io.gluth.pagespace.ui
 
 import io.gluth.pagespace.domain.Page
 import io.gluth.pagespace.layout.ForceDirectedLayout
-import io.gluth.pagespace.layout.NodePosition
+import io.gluth.pagespace.presenter.SpatialMath
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -66,7 +66,9 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
             }
             override fun mouseReleased(e: MouseEvent) {
                 if (!dragging) {
-                    val nearest = nearestPage(e.x, e.y)
+                    val nearest = SpatialMath.nearestPage(
+                        e.x, e.y, cachedProjections, cachedScales, BASE_RADIUS, CLICK_RADIUS
+                    )
                     if (nearest != null) navigationListener?.navigateTo(nearest)
                 }
             }
@@ -119,16 +121,26 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         val positions = layout.positions
         if (positions.isEmpty()) return
 
+        val lw = layout.width
+        val lh = layout.height
+        val ld = layout.depth
+        val vw = width.toDouble()
+        val vh = height.toDouble()
+
         // Pre-compute rotated coordinates for all nodes
         val rotated = LinkedHashMap<Page, DoubleArray>()
-        for ((page, np) in positions) rotated[page] = viewTransform(np)
+        for ((page, np) in positions) {
+            rotated[page] = SpatialMath.viewTransform(
+                np.x, np.y, np.z, viewYaw, viewPitch, lw, lh, ld
+            )
+        }
 
         // Cache projected coordinates and scales for hit-testing
         val projCache = LinkedHashMap<Page, IntArray>()
         val scaleCache = LinkedHashMap<Page, Double>()
         for ((page, r3) in rotated) {
-            projCache[page] = project(r3[0], r3[1], r3[2])
-            scaleCache[page] = perspScale(r3[2])
+            projCache[page] = SpatialMath.project(r3[0], r3[1], r3[2], vw, vh, lw, lh, ld)
+            scaleCache[page] = SpatialMath.perspScale(r3[2], ld)
         }
         cachedProjections = projCache
         cachedScales = scaleCache
@@ -143,7 +155,7 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
             for (tgt in layout.edgesFrom(src)) {
                 val tr = rotated[tgt] ?: continue
                 val avgZ  = (sr[2] + tr[2]) / 2.0
-                val alpha = alphaFor(avgZ).toFloat()
+                val alpha = SpatialMath.alphaFor(avgZ, ld, MIN_ALPHA).toFloat()
                 val sp    = projCache[src] ?: continue
                 val ep    = projCache[tgt] ?: continue
                 g2.color  = withAlpha(EDGE_COLOR, alpha * 0.55f)
@@ -158,9 +170,9 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
             val r3    = entry.value
             val curr  = page == currentPage
 
-            val scale = scaleCache[page] ?: perspScale(r3[2])
-            val alpha = if (curr) 1.0f else alphaFor(r3[2]).toFloat()
-            val sc    = projCache[page] ?: project(r3[0], r3[1], r3[2])
+            val scale = scaleCache[page] ?: SpatialMath.perspScale(r3[2], ld)
+            val alpha = if (curr) 1.0f else SpatialMath.alphaFor(r3[2], ld, MIN_ALPHA).toFloat()
+            val sc    = projCache[page] ?: SpatialMath.project(r3[0], r3[1], r3[2], vw, vh, lw, lh, ld)
             val cx    = sc[0]; val cy = sc[1]
             val r     = max(4, (BASE_RADIUS * scale).toInt())
 
@@ -176,91 +188,10 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
             g2.font = baseFont.deriveFont(if (curr) Font.BOLD else Font.PLAIN, fontSize)
             val fm    = g2.fontMetrics
             val label = page.title
-            val lw    = fm.stringWidth(label)
+            val labelWidth = fm.stringWidth(label)
             g2.color  = withAlpha(LABEL_COLOR, alpha)
-            g2.drawString(label, cx - lw / 2, cy + r + fm.ascent + 1)
+            g2.drawString(label, cx - labelWidth / 2, cy + r + fm.ascent + 1)
         }
-    }
-
-    // -------------------------------------------------------------- hit-test
-
-    private fun nearestPage(mx: Int, my: Int): Page? {
-        val projections = cachedProjections
-        val scales = cachedScales
-        if (projections.isEmpty()) return null
-
-        var nearest: Page? = null
-        var minDist = CLICK_RADIUS.toDouble()
-
-        for ((page, sc) in projections) {
-            val dist = hypot((mx - sc[0]).toDouble(), (my - sc[1]).toDouble())
-            val scale = scales[page] ?: 1.0
-            val r = BASE_RADIUS * scale
-            if (dist < max(r, CLICK_RADIUS / 2.0) && dist < minDist) {
-                minDist = dist
-                nearest = page
-            }
-        }
-        if (nearest == null) {
-            for ((page, sc) in projections) {
-                val dist = hypot((mx - sc[0]).toDouble(), (my - sc[1]).toDouble())
-                if (dist < CLICK_RADIUS && dist < minDist) {
-                    minDist = dist
-                    nearest = page
-                }
-            }
-        }
-        return nearest
-    }
-
-    // ---------------------------------------------------- view transform
-
-    /** Rotates a world position around the sphere centre by viewYaw/viewPitch. Returns [rx, ry, rz]. */
-    private fun viewTransform(np: NodePosition): DoubleArray {
-        val ocx = layout.width  / 2.0
-        val ocy = layout.height / 2.0
-        val ocz = layout.depth  / 2.0
-
-        // translate to origin
-        var x = np.x - ocx
-        var y = np.y - ocy
-        var z = np.z - ocz
-
-        // yaw: rotate around Y axis
-        val cosY = cos(viewYaw); val sinY = sin(viewYaw)
-        val x1 = x * cosY + z * sinY
-        val z1 = -x * sinY + z * cosY
-
-        // pitch: rotate around X axis
-        val cosP = cos(viewPitch); val sinP = sin(viewPitch)
-        val y2 = y * cosP - z1 * sinP
-        val z2 = y * sinP + z1 * cosP
-
-        return doubleArrayOf(x1 + ocx, y2 + ocy, z2 + ocz)
-    }
-
-    // ------------------------------------------------------------ projection
-
-    private fun project(rx: Double, ry: Double, rz: Double): IntArray {
-        val pw = width.toDouble()
-        val ph = height.toDouble()
-        val cx = pw / 2.0
-        val cy = ph / 2.0
-        val bx = rx * pw / layout.width
-        val by = ry * ph / layout.height
-        val s  = perspScale(rz)
-        return intArrayOf((cx + (bx - cx) * s).toInt(), (cy + (by - cy) * s).toInt())
-    }
-
-    private fun perspScale(wz: Double): Double {
-        val focal = layout.depth
-        return focal / (focal + wz)
-    }
-
-    private fun alphaFor(wz: Double): Double {
-        val d = layout.depth
-        if (d <= 0) return 1.0
-        return 1.0 - (wz / d) * (1.0 - MIN_ALPHA)
     }
 
     private fun withAlpha(c: Color, alpha: Float): Color {

@@ -4,6 +4,7 @@ import io.gluth.pagespace.backend.MockContentBackend
 import io.gluth.pagespace.domain.Page
 import io.gluth.pagespace.domain.PageGraph
 import io.gluth.pagespace.layout.ForceDirectedLayout
+import io.gluth.pagespace.presenter.NavigationPresenter
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.DisabledIf
 import java.awt.GraphicsEnvironment
@@ -32,11 +33,12 @@ class MainWindowTest {
         val backend = MockContentBackend()
         val graph   = PageGraph()
         val layout  = ForceDirectedLayout(graph, 800.0, 600.0, 42L)
+        val presenter = NavigationPresenter(graph, layout, backend)
 
         val ref   = AtomicReference<MainWindow>()
         val latch = CountDownLatch(1)
         SwingUtilities.invokeLater {
-            ref.set(MainWindow(backend, graph, layout))
+            ref.set(MainWindow(presenter))
             latch.countDown()
         }
         latch.await(5, TimeUnit.SECONDS)
@@ -155,19 +157,18 @@ class MainWindowTest {
 
     @Test
     fun seeAlsoEscapesHtmlEntities() {
-        // Test through buildSeeAlso via reflection
-        val window = createWindow()
-        val buildMethod = MainWindow::class.java.getDeclaredMethod(
-            "buildSeeAlso", String::class.java, List::class.java
-        )
-        buildMethod.isAccessible = true
+        // Test buildSeeAlso through the presenter (now public)
+        val backend = MockContentBackend()
+        val graph   = PageGraph()
+        val layout  = ForceDirectedLayout(graph, 800.0, 600.0, 42L)
+        val presenter = NavigationPresenter(graph, layout, backend)
 
         val links = listOf(
             Page("AT&T", "AT&T"),
             Page("A<B", "A<B"),
             Page("Gödel's theorem", "Gödel's theorem")
         )
-        val result = buildMethod.invoke(window, "<p>body</p>", links) as String
+        val result = presenter.buildSeeAlso("<p>body</p>", links)
 
         assertTrue(result.contains("AT&amp;T"))
         assertTrue(result.contains("A&lt;B"))
