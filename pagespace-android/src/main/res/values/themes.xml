@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PageSpace" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#121423</item>
+        <item name="android:navigationBarColor">#121423</item>
+    </style>
+</resources>

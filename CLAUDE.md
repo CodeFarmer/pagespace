@@ -11,15 +11,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-The design is intentionally target-agnostic: a core spatial navigation engine supports multiple content backends. The **reference implementation is Kotlin/Swing**.
+The design is intentionally target-agnostic: a core spatial navigation engine supports multiple content backends. Two implementations exist: **desktop (Kotlin/Swing)** and **Android (Jetpack Compose)**.
+
+**Multi-module Gradle build** (`settings.gradle.kts`):
+- `pagespace-core` — domain, backend, layout, presenter (pure Kotlin JVM, no platform deps)
+- `pagespace-android` — Compose UI, OkHttp HTTP client, ViewModel
+
+Maven (`pom.xml`) remains for the desktop build.
 
 ```
 src/main/kotlin/io/gluth/pagespace/
 ├── domain/          Page, Link, PageGraph
 ├── backend/         ContentBackend (interface), PageNotFoundException, MockContentBackend
 ├── layout/          NodePosition, ForceDirectedLayout
-├── ui/              NavigationListener, ContentPane, SpatialPane, MainWindow
-└── PageSpaceApp.kt
+├── presenter/       NavigationPresenter, SpatialMath, NavigationHistory
+├── ui/              NavigationListener, ContentPane, SpatialPane, MainWindow  (Swing desktop)
+└── PageSpaceApp.kt  (Swing entry point + defaultHttpGet)
+
+pagespace-android/src/main/kotlin/io/gluth/pagespace/android/
+├── MainActivity.kt        Single-activity Compose entry point
+├── PageSpaceViewModel.kt  Wraps NavigationPresenter with coroutines
+├── PageSpaceScreen.kt     Adaptive portrait/landscape layout
+├── SpatialCanvas.kt       Compose Canvas port of SpatialPane
+├── ContentView.kt         WebView with link interception
+├── SearchBar.kt           Debounced search with dropdown
+├── PageSpaceTheme.kt      Material 3 dark theme
+└── AndroidHttpGet.kt      OkHttp-based httpGet
 ```
 
 ## Key Decisions
@@ -71,14 +88,18 @@ TDD: write a failing test first, then implement the minimum to pass, then refact
 ## Build & Run
 
 ```bash
-mvn test                          # run all tests (49 as of Kotlin port)
+# Desktop (Maven)
+mvn test                          # run all tests (127)
 mvn test -Dtest=ForceDirectedLayoutTest
 mvn package && java -jar target/page-space-0.1.0-SNAPSHOT.jar
+
+# Core module (Gradle)
+gradle :pagespace-core:build      # compile + test shared code
+
+# Android (Gradle — requires Android SDK)
+gradle :pagespace-android:assembleDebug
+gradle :pagespace-android:installDebug   # install on connected device/emulator
 ```
-
-## TODO
-
-- **Package as an Android app**
 
 ## Extension Points
 

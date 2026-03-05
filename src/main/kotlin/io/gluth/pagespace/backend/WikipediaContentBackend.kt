@@ -2,14 +2,9 @@ package io.gluth.pagespace.backend
 
 import io.gluth.pagespace.domain.Page
 import java.io.IOException
-import java.net.URI
 import java.net.URLEncoder
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 
-class WikipediaContentBackend internal constructor(
+class WikipediaContentBackend(
     private val httpGet: (String) -> String
 ) : ContentBackend {
 
@@ -30,8 +25,6 @@ class WikipediaContentBackend internal constructor(
         private val DEFAULT_PAGE = Page("Physics", "Physics")
         private const val MAX_CACHE_SIZE = 200
     }
-
-    constructor() : this(defaultHttpGet())
 
     private val summaryCache: MutableMap<String, String>     = lruCache(MAX_CACHE_SIZE)
     private val bodyCache:    MutableMap<String, String>      = lruCache(MAX_CACHE_SIZE)
@@ -101,26 +94,5 @@ class WikipediaContentBackend internal constructor(
                 return size > maxSize
             }
         }
-    }
-}
-
-private fun defaultHttpGet(): (String) -> String {
-    val http = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build()
-    val userAgent = "page-space/0.1 (https://github.com/CodeFarmer/page-space; educational)"
-
-    return { url ->
-        val req = HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .header("User-Agent", userAgent)
-            .timeout(Duration.ofSeconds(15))
-            .GET()
-            .build()
-        val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
-        if (resp.statusCode() == 404) throw PageNotFoundException(url)
-        if (resp.statusCode() != 200)
-            throw PageNotFoundException("HTTP ${resp.statusCode()} for $url")
-        resp.body()
     }
 }

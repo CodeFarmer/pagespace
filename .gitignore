@@ -1,2 +1,9 @@
 target/
+build/
+.gradle/
+.kotlin/
+pagespace-core/build/
+pagespace-android/build/
+local.properties
+pagespace-android/src/main/res/raw/
 *.md~
