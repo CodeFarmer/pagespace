@@ -8,7 +8,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -29,8 +28,6 @@ import androidx.compose.ui.unit.sp
 import io.gluth.pagespace.domain.Page
 import io.gluth.pagespace.layout.ForceDirectedLayout
 import io.gluth.pagespace.presenter.SpatialMath
-import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.hypot
 
@@ -55,8 +52,7 @@ fun SpatialCanvas(
     onNavigate: (Page) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var viewYaw by remember { mutableDoubleStateOf(0.0) }
-    var viewPitch by remember { mutableDoubleStateOf(0.0) }
+    var viewRotation by remember { mutableStateOf(doubleArrayOf(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)) }
     var resettingView by remember { mutableStateOf(false) }
     var frameCount by remember { mutableIntStateOf(0) }
     var canvasWidth by remember { mutableFloatStateOf(0f) }
@@ -70,7 +66,7 @@ fun SpatialCanvas(
     var lastNavPage by remember { mutableStateOf<Page?>(null) }
     if (currentPage != null && currentPage != lastNavPage) {
         lastNavPage = currentPage
-        if (abs(viewYaw) > VIEW_RESET_SNAP || abs(viewPitch) > VIEW_RESET_SNAP) {
+        if (!SpatialMath.isNearIdentity(viewRotation, VIEW_RESET_SNAP.toDouble())) {
             resettingView = true
         }
     }
@@ -83,11 +79,9 @@ fun SpatialCanvas(
             withFrameMillis {
                 layout.step()
                 if (resettingView) {
-                    viewYaw *= (1 - VIEW_RESET_SPEED)
-                    viewPitch *= (1 - VIEW_RESET_SPEED)
-                    if (abs(viewYaw) < VIEW_RESET_SNAP && abs(viewPitch) < VIEW_RESET_SNAP) {
-                        viewYaw = 0.0
-                        viewPitch = 0.0
+                    viewRotation = SpatialMath.lerpToIdentity(viewRotation, VIEW_RESET_SPEED.toDouble())
+                    if (SpatialMath.isNearIdentity(viewRotation, VIEW_RESET_SNAP.toDouble())) {
+                        viewRotation = doubleArrayOf(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
                         resettingView = false
                     }
                 }
@@ -112,10 +106,8 @@ fun SpatialCanvas(
                 detectDragGestures { change, dragAmount ->
                     change.consume()
                     resettingView = false
-                    viewYaw += dragAmount.x * DRAG_SENSITIVITY
-                    viewYaw = normalizeAngle(viewYaw)
-                    viewPitch += dragAmount.y * DRAG_SENSITIVITY
-                    viewPitch = viewPitch.coerceIn(-PI / 2, PI / 2)
+                    viewRotation = SpatialMath.applyYaw(viewRotation, (-dragAmount.x * DRAG_SENSITIVITY).toDouble())
+                    viewRotation = SpatialMath.applyPitch(viewRotation, (dragAmount.y * DRAG_SENSITIVITY).toDouble())
                 }
             }
     ) {
@@ -139,7 +131,7 @@ fun SpatialCanvas(
         val rotated = LinkedHashMap<Page, DoubleArray>()
         for ((page, np) in positions) {
             rotated[page] = SpatialMath.viewTransform(
-                np.x, np.y, np.z, viewYaw, viewPitch, lw, lh, ld
+                np.x, np.y, np.z, viewRotation, lw, lh, ld
             )
         }
 
@@ -228,11 +220,4 @@ private fun DrawScope.drawNodeLabel(
         result,
         topLeft = Offset(cx - result.size.width / 2f, topY)
     )
-}
-
-private fun normalizeAngle(a: Double): Double {
-    var r = a % (2 * PI)
-    if (r > PI) r -= 2 * PI
-    if (r < -PI) r += 2 * PI
-    return r
 }
