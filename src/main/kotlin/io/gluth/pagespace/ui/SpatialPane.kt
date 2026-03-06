@@ -30,8 +30,7 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
     private var currentPage: Page? = null
     private var navigationListener: NavigationListener? = null
 
-    private var viewYaw   = 0.0
-    private var viewPitch = 0.0
+    private var viewRotation = doubleArrayOf(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
     private var resettingView = false
 
     private var dragStartX = 0
@@ -48,10 +47,10 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         val timer = Timer(30) {
             layout.step()
             if (resettingView) {
-                viewYaw   *= (1 - VIEW_RESET_SPEED)
-                viewPitch *= (1 - VIEW_RESET_SPEED)
-                if (abs(viewYaw) < VIEW_RESET_SNAP && abs(viewPitch) < VIEW_RESET_SNAP) {
-                    viewYaw = 0.0; viewPitch = 0.0; resettingView = false
+                viewRotation = SpatialMath.lerpToIdentity(viewRotation, VIEW_RESET_SPEED)
+                if (SpatialMath.isNearIdentity(viewRotation, VIEW_RESET_SNAP)) {
+                    viewRotation = doubleArrayOf(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+                    resettingView = false
                 }
             }
             repaint()
@@ -80,10 +79,8 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
                 if (!dragging && hypot(dx.toDouble(), dy.toDouble()) < DRAG_THRESHOLD) return
                 dragging = true
                 resettingView = false
-                viewYaw   += dx * DRAG_SENSITIVITY
-                viewYaw    = normalizeAngle(viewYaw)
-                viewPitch += dy * DRAG_SENSITIVITY
-                viewPitch  = viewPitch.coerceIn(-Math.PI / 2, Math.PI / 2)
+                viewRotation = SpatialMath.applyYaw(viewRotation, dx * DRAG_SENSITIVITY)
+                viewRotation = SpatialMath.applyPitch(viewRotation, dy * DRAG_SENSITIVITY)
                 dragStartX = e.x
                 dragStartY = e.y
                 repaint()
@@ -97,17 +94,10 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
 
     fun setCurrentPage(page: Page) {
         currentPage = page
-        if (abs(viewYaw) > VIEW_RESET_SNAP || abs(viewPitch) > VIEW_RESET_SNAP) {
+        if (!SpatialMath.isNearIdentity(viewRotation, VIEW_RESET_SNAP)) {
             resettingView = true
         }
         repaint()
-    }
-
-    private fun normalizeAngle(a: Double): Double {
-        var r = a % (2 * Math.PI)
-        if (r > Math.PI) r -= 2 * Math.PI
-        if (r < -Math.PI) r += 2 * Math.PI
-        return r
     }
 
     // ------------------------------------------------------------------ paint
@@ -131,7 +121,7 @@ class SpatialPane(private val layout: ForceDirectedLayout) : JPanel() {
         val rotated = LinkedHashMap<Page, DoubleArray>()
         for ((page, np) in positions) {
             rotated[page] = SpatialMath.viewTransform(
-                np.x, np.y, np.z, viewYaw, viewPitch, lw, lh, ld
+                np.x, np.y, np.z, viewRotation, lw, lh, ld
             )
         }
 
