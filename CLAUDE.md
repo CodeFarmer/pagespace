@@ -106,3 +106,9 @@ gradle :pagespace-android:installDebug   # install on connected device/emulator
 - **Wikipedia backend**: implement `ContentBackend` → wire in `PageSpaceApp`. Zero engine changes.
 - **3D upgrade**: `NodePosition` already has `x/y/z`; swap `SpatialPane` renderer to JOGL/JavaFX 3D. Zero domain/layout changes.
 - **Thread safety**: `layout.step()` and graph mutation both run on EDT — no sync needed now. If `step()` moves to a background thread, wrap graph accesses.
+
+## TODO
+
+- Better clustering and pruning in the spatial layout — both are currently weak
+- Add an everything2 backend (implement `ContentBackend` against everything2)
+- Consider unifying the build onto one system (currently desktop uses Maven, core+Android use Gradle)
