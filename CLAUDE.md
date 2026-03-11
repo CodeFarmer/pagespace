@@ -101,6 +101,22 @@ gradle :pagespace-android:assembleDebug
 gradle :pagespace-android:installDebug   # install on connected device/emulator
 ```
 
+### Testing Android behind a TLS-intercepting proxy
+
+If the network uses a proxy that re-signs TLS traffic (e.g. Cloudflare Gateway), the Android emulator won't trust the proxy's CA by default. To fix:
+
+1. Extract the proxy's root CA cert:
+   ```bash
+   echo | openssl s_client -connect en.wikipedia.org:443 -servername en.wikipedia.org -showcerts 2>/dev/null \
+     | awk 'n>0 && /BEGIN CERT/{f=1} f{print; if(/END CERT/) exit} /END CERT/{n++}' \
+     > pagespace-android/src/main/res/raw/proxy_ca.pem
+   ```
+2. Add it to `pagespace-android/src/main/res/xml/network_security_config.xml`:
+   ```xml
+   <certificates src="@raw/proxy_ca" />
+   ```
+3. Rebuild and install. The `res/raw/` directory is gitignored — do not commit proxy CA certs.
+
 ## Extension Points
 
 - **Wikipedia backend**: implement `ContentBackend` → wire in `PageSpaceApp`. Zero engine changes.
@@ -109,6 +125,10 @@ gradle :pagespace-android:installDebug   # install on connected device/emulator
 
 ## TODO
 
-- Better clustering and pruning in the spatial layout — both are currently weak
-- Add an everything2 backend (implement `ContentBackend` against everything2)
+
+- Better pruning
 - Consider unifying the build onto one system (currently desktop uses Maven, core+Android use Gradle)
+- **Everything2 backend**: implement `ContentBackend` for [Everything2](https://everything2.com/).
+- **Node clustering**: improve force layout so heavily cross-linked nodes cluster more tightly together (current `sharedLinkCount` weighting may need tuning or a separate clustering force).
+- **Android reading pane scroll**: ensure the content WebView is fully scrollable so the entire article and all "See also" links are reachable.
+
